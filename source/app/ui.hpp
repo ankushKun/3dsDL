@@ -505,6 +505,7 @@ struct ProgressView {
     std::string tag;     // "4 connections"
     std::string note;    // green, e.g. "Continuing from 12.0 MiB"
     std::string message; // on the bottom panel: where it goes, or a warning
+    bool cancellable = true; // a Cancel button under the panel
     bool stopping = false;
 };
 

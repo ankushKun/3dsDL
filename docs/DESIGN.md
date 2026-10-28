@@ -152,7 +152,7 @@ strip for a red button and a 30 px dark Cancel strip.
 | Downloading | file, progress, amounts, speed, connections tag | saving to, Cancel |
 | File exists | which file and what each choice does | dialog: Keep Both / Replace / Cancel |
 | Install prompt | icon, name, publisher, Title ID, Version, Size | Install, Install and Delete File, Keep File |
-| Installing | icon, name, progress | do not turn off, Cancel |
+| Installing | icon, name, progress | do not turn off |
 | Installed | icon, name, time taken | dialog: Close / Launch |
 | Files | details of the highlighted entry; a picture's preview, a song's cover | path, six rows, Back, page counter, Options |
 | File options | the file the choices act on | eight small buttons in two columns |

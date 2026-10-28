@@ -3480,8 +3480,9 @@ void drawProgress(const ProgressView &view)
     }
 
     beginBottom();
-    // Two lines of the message at most.
-    const Rect panel = {13, 10, 294, 128};
+    // Three lines of the message at most, in a panel that fills the screen
+    // when there is no Cancel button under it.
+    const Rect panel = {13, 10, 294, view.cancellable ? 128.0f : 220.0f};
     drawPanel(panel);
     // A message that ends in a folder ("Saving to sdmc:/Downloads/") breaks
     // before the path instead of inside it; the path scrolls if it is long.
@@ -3493,7 +3494,7 @@ void drawProgress(const ProgressView &view)
         lines = {view.message.substr(0, path), view.message.substr(path + 1)};
         pathLine = true;
     } else {
-        lines = wrap(view.message, type::Body, 266, 2);
+        lines = wrap(view.message, type::Body, 266, 3);
     }
     float y = panel.y + (panel.h - lines.size() * lineHeight(type::Body)) / 2;
     for (size_t index = 0; index < lines.size(); ++index) {
@@ -3506,10 +3507,10 @@ void drawProgress(const ProgressView &view)
         }
         y += lineHeight(type::Body);
     }
-    if (view.stopping) {
+    if (view.cancellable && view.stopping) {
         drawButton(ProgressCancelButton, "Stopping...", Style::Disabled,
                    type::Button);
-    } else {
+    } else if (view.cancellable) {
         drawButton(ProgressCancelButton, "Cancel");
         drawFocus(ProgressCancelButton, 9);
     }

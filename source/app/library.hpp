@@ -1,5 +1,6 @@
 #pragma once
 
+#include "smdh.hpp"
 #include "titles.hpp"
 
 #include <3ds.h>
@@ -109,6 +110,9 @@ private:
 FS_MediaType mediaOf(const titles::Title &title);
 // The installed title 3dsDL runs as, or 0 for the .3dsx.
 uint64_t runningTitle();
+// The name and icon of installed software. False when it has none, as for
+// DSiWare.
+bool titleSmdh(uint64_t titleId, FS_MediaType media, smdh::Info &info);
 
 bool deleteTitle(const titles::Title &title, bool withTicket,
                  std::string &error);

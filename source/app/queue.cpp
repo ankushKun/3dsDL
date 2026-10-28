@@ -971,7 +971,8 @@ void App::installDirectly(const std::string &address)
                    : static_cast<size_t>(0);
     };
     const net::Result result =
-        tasks::download(request, settings_.keepAwake, "", true);
+        tasks::download(request, settings_.keepAwake, "", true,
+                        [&sink]() { return sink.started(); });
     if (!result.partPath.empty()) {
         fs::removeFile(result.partPath); // empty: the data went to the install
     }

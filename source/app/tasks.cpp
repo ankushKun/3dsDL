@@ -14,6 +14,7 @@
 #include <algorithm>
 #include <atomic>
 #include <unordered_set>
+#include <utility>
 
 namespace tasks {
 namespace {
@@ -147,10 +148,17 @@ struct DownloadJob : net::Observer {
     uint64_t total = 0;
     uint64_t resumedFrom = 0;
     int connections = 0;
+    // Set for a direct install: true once AM has the data.
+    std::function<bool()> installStarted;
 
     DownloadJob() { LightLock_Init(&lock); }
 
-    bool cancelRequested() override { return cancel.load(); }
+    bool stoppable() const { return !installStarted || !installStarted(); }
+    // A Stop pressed just before the install started is not carried out.
+    bool cancelRequested() override
+    {
+        return cancel.load() && (closing.load() || stoppable());
+    }
     bool keepPartialOnCancel() override { return closing.load(); }
     void onPhase(net::Phase value) override
     {
@@ -207,6 +215,7 @@ struct ExtractJob : archives::Observer {
 
     ExtractJob() { LightLock_Init(&lock); }
 
+    bool stoppable() const { return true; }
     bool cancelRequested() override { return cancel.load(); }
     void onProgress(const archives::Progress &now) override
     {
@@ -237,6 +246,8 @@ struct InstallJob : installer::Observer {
 
     InstallJob() { LightLock_Init(&lock); }
 
+    // Only closing 3dsDL cancels an install.
+    bool stoppable() const { return false; }
     bool cancelRequested() override { return cancel.load(); }
     void onProgress(uint64_t now, uint64_t expected) override
     {
@@ -267,6 +278,7 @@ struct FileJob : fileops::Observer {
 
     FileJob() { LightLock_Init(&lock); }
 
+    bool stoppable() const { return true; }
     bool cancelRequested() override { return cancel.load(); }
     void onProgress(uint64_t now, uint64_t expected,
                     const std::string &name) override
@@ -286,7 +298,9 @@ void runFileJob(void *argument)
 }
 
 // Waits for the worker while drawing frames with draw(). Returns once the
-// worker has finished, having asked it to stop if the user cancelled.
+// worker has finished, having asked it to stop if the user cancelled. While
+// the job is not stoppable, HOME is held back too, as closing 3dsDL from the
+// HOME Menu would stop it.
 template <typename Job, typename Draw>
 void supervise(Job &job, Thread thread, const std::string &what, Draw draw)
 {
@@ -296,13 +310,15 @@ void supervise(Job &job, Thread thread, const std::string &what, Draw draw)
     unsigned frame = 0;
     ui::enterScreen("progress|" + what);
     while (!job.finished) {
+        aptSetHomeAllowed(job.stoppable());
         if (!ui::keepRunning()) {
             job.closing = true;
             job.cancel = true;
             break;
         }
         const ui::Input input = ui::readInput();
-        if (!job.cancel && wantsCancel(input) && confirmStop(what)) {
+        if (job.stoppable() && !job.cancel && wantsCancel(input) &&
+            confirmStop(what)) {
             job.cancel = true;
         }
         if (frame++ % FramesPerDraw == 0) {
@@ -310,6 +326,7 @@ void supervise(Job &job, Thread thread, const std::string &what, Draw draw)
         }
         gspWaitForVBlank();
     }
+    aptSetHomeAllowed(true);
     threadJoin(thread, U64_MAX);
     threadFree(thread);
 }
@@ -414,10 +431,12 @@ bool busy(const std::string &header, const std::string &title,
 }
 
 net::Result download(const net::Request &request, bool keepAwake,
-                     const std::string &step, bool direct)
+                     const std::string &step, bool direct,
+                     std::function<bool()> installStarted)
 {
     DownloadJob job;
     job.request = &request;
+    job.installStarted = std::move(installStarted);
 
     StayAwake awake(keepAwake);
     Thread thread = startWorkerThread(runDownload, &job, "download");
@@ -476,6 +495,7 @@ net::Result download(const net::Request &request, bool keepAwake,
         view.source = "from " + host;
         view.message = direct ? "Installing as it downloads"
                               : "Saving to " + request.folder;
+        view.cancellable = job.stoppable();
         view.stopping = job.cancel;
         ui::drawProgress(view);
     });
@@ -653,7 +673,7 @@ installer::Result install(const std::string &path, uint64_t titleId,
         view.source = path.substr(path.find_last_of('/') + 1);
         view.titleIcon = icon;
         view.message = "Do not turn off the power or remove the SD card.";
-        view.stopping = job.cancel;
+        view.cancellable = false;
         ui::drawProgress(view);
     });
     if (job.closing && job.result.outcome == installer::Outcome::Cancelled) {
