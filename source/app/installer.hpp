@@ -65,6 +65,8 @@ public:
     Result finish();
     // Abandons the install; nothing is changed.
     void cancel();
+    // True once AM has the install. Any thread may ask.
+    bool started() const { return started_; }
     const cia::Info &info() const { return stream_.info(); }
     const Result &result() const { return result_; }
 
@@ -73,7 +75,7 @@ private:
 
     cia::Stream stream_;
     Handle target_ = 0;
-    bool started_ = false;
+    std::atomic<bool> started_ {false};
     uint64_t written_ = 0;
     u64 startTime_ = 0;
     Result result_;

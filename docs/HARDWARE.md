@@ -135,8 +135,10 @@ installed, and a game older than the installed version.
     which one, and whether the save survives REPLACE. An older version asks
     first and warns about save data.
 33. An update and a DLC install over their game, and LAUNCH opens the game.
-34. Cancelling halfway leaves nothing behind: the title is not on the HOME
-    Menu and installing it again works.
+34. An install has no Cancel, B does nothing and HOME is held back until it
+    ends. Stopping one used to leave the SD card unreadable until a restart
+    (issue #15). A direct install keeps Cancel until the CIA's header has
+    arrived, then loses it.
 35. A CIA bigger than the free space is refused before anything is written.
 36. LAUNCH after installing starts the title, from both the `.3dsx` and the
     CIA build. Installing 3dsDL's own CIA over itself from the CIA build works.
