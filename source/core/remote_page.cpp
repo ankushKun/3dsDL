@@ -1116,6 +1116,8 @@ $('#etext').addEventListener('keydown', e => {
 const U = {items: [], current: null, pill: '', made: new Set(), arrived: [], sent: 0, ms: 0};
 async function plan(files) {
   if (!files.length) return;
+  // Folders made for an earlier batch may have been deleted since.
+  U.made.clear();
   const dirs = new Map();
   for (const f of files) dirs.set(parent(f.path), null);
   let checked = 0;
@@ -1402,8 +1404,18 @@ addEventListener('drop', async e => {
   $('#drop').hidden = true;
   if (!canDrop()) return;
   e.preventDefault();
-  const out = [], items = [...e.dataTransfer.items].map(i => i.webkitGetAsEntry && i.webkitGetAsEntry());
-  if (items.length && items.every(Boolean)) { for (const it of items) await walk(it, F.cwd, out); plan(out); } else pick(e.dataTransfer.files);
+  // Each dropped item keeps its folders when the browser can walk it; one it
+  // cannot walk goes up on its own, without taking the others' folders away.
+  // The items are only readable until the first await.
+  const into = F.cwd, out = [];
+  const dropped = [...e.dataTransfer.items].filter(i => i.kind === 'file')
+    .map(i => ({entry: i.webkitGetAsEntry && i.webkitGetAsEntry(), file: i.getAsFile()}));
+  if (!dropped.some(d => d.entry)) return pick(e.dataTransfer.files);
+  for (const d of dropped) {
+    if (d.entry) await walk(d.entry, into, out);
+    else if (d.file) out.push({file: d.file, path: join(into, d.file.name)});
+  }
+  plan(out);
 });
 
 // --- Keys ---------------------------------------------------------------------------
