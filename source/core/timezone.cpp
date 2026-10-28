@@ -126,4 +126,29 @@ std::string describeDrift(int64_t consoleUnixSeconds,
     return buffer;
 }
 
+int64_t unixSeconds(int year, int month, int day, int hour, int minute,
+                    int second)
+{
+    // Days from 1970-01-01, counting years from March so that the leap day
+    // comes last (Howard Hinnant's days_from_civil).
+    const int64_t y = year - (month <= 2 ? 1 : 0);
+    const int64_t era = (y >= 0 ? y : y - 399) / 400;
+    const int64_t yearOfEra = y - era * 400;
+    const int64_t dayOfYear =
+        (153 * (month > 2 ? month - 3 : month + 9) + 2) / 5 + day - 1;
+    const int64_t dayOfEra =
+        yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear;
+    const int64_t days = era * 146097 + dayOfEra - 719468;
+    return days * 86400 + hour * 3600 + minute * 60 + second;
+}
+
+bool coversConsoleTime(int64_t notBefore, int64_t notAfter,
+                       int64_t consoleUnixSeconds)
+{
+    const int64_t earliest = consoleUnixSeconds - MaxOffsetMinutes * 60LL;
+    const int64_t latest = consoleUnixSeconds - MinOffsetMinutes * 60LL;
+    return notBefore <= notAfter && notBefore <= latest &&
+           notAfter >= earliest;
+}
+
 } // namespace tz

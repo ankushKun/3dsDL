@@ -1,6 +1,7 @@
 #include "fetch.hpp"
 
 #include "download_engine.hpp"
+#include "tls_clock.hpp"
 
 #include <curl/curl.h>
 
@@ -70,6 +71,7 @@ FetchResult fetch(const FetchRequest &request)
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    useLocalClock(curl);
     if (!request.caFile.empty()) {
         curl_easy_setopt(curl, CURLOPT_CAINFO, request.caFile.c_str());
     }

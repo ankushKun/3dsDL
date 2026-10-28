@@ -93,3 +93,33 @@ TEST("tz: drift descriptions")
     CHECK_EQ(tz::describeDrift(0, 365 * 86400LL),
              std::string("about 365 days behind"));
 }
+
+TEST("tz: calendar times to seconds")
+{
+    CHECK_EQ(tz::unixSeconds(1970, 1, 1, 0, 0, 0), 0LL);
+    CHECK_EQ(tz::unixSeconds(1969, 12, 31, 23, 59, 59), -1LL);
+    CHECK_EQ(tz::unixSeconds(2000, 1, 1, 0, 0, 0), tz::UnixToY2kMs / 1000);
+    CHECK_EQ(tz::unixSeconds(2024, 2, 29, 0, 0, 0), 1709164800LL);
+    CHECK_EQ(tz::unixSeconds(2026, 10, 12, 6, 0, 0), 1791784800LL);
+    CHECK_EQ(tz::unixSeconds(2050, 1, 1, 0, 0, 0), 2524608000LL);
+}
+
+TEST("tz: certificates against a local clock")
+{
+    // api.github.com's certificate from 2026-10-28, checked by a console in
+    // US Eastern time at 20:22 the evening before, when it was already in use.
+    const int64_t from = tz::unixSeconds(2026, 10, 28, 0, 0, 0);
+    const int64_t to = tz::unixSeconds(2027, 1, 25, 23, 59, 59);
+    CHECK(tz::coversConsoleTime(from, to,
+                                tz::unixSeconds(2026, 10, 27, 20, 22, 0)));
+    // UTC-12 is the furthest west; a clock further behind is simply wrong.
+    CHECK(tz::coversConsoleTime(from, to, from - 12 * 3600));
+    CHECK(!tz::coversConsoleTime(from, to, from - 12 * 3600 - 1));
+    // UTC+14 is the furthest east, for a certificate that has just expired.
+    CHECK(tz::coversConsoleTime(from, to, to + 14 * 3600));
+    CHECK(!tz::coversConsoleTime(from, to, to + 14 * 3600 + 1));
+    CHECK(!tz::coversConsoleTime(from, to,
+                                 tz::unixSeconds(2010, 1, 1, 0, 0, 0)));
+    // Dates the wrong way round are never valid.
+    CHECK(!tz::coversConsoleTime(to, from, from));
+}

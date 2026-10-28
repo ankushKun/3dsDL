@@ -38,4 +38,15 @@ bool guessOffset(int64_t consoleUnixSeconds, int64_t utcUnixSeconds,
 std::string describeDrift(int64_t consoleUnixSeconds,
                           int64_t correctUnixSeconds);
 
+// Seconds since 1970 for a UTC calendar time; month and day count from 1.
+int64_t unixSeconds(int year, int month, int day, int hour, int minute,
+                    int second);
+
+// TLS reads the console clock as UTC, but it holds local time, so real UTC
+// is anywhere from 14 hours behind it to 12 hours ahead. True when a
+// certificate valid from notBefore to notAfter (UTC) is valid at some moment
+// in that range.
+bool coversConsoleTime(int64_t notBefore, int64_t notAfter,
+                       int64_t consoleUnixSeconds);
+
 } // namespace tz

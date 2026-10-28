@@ -48,4 +48,5 @@ A Nintendo 3DS homebrew app (C++17, libctru, citro2d) that downloads files, inst
 
 - Using a new libctru service or hardware block needs `resources/3dsDL.rsf` updated in the same change. Azahar does not enforce the RSF, so a missing entry only crashes the CIA on a console.
 - Azahar has no real system font, so text widths there are not the console's.
+- The console clock holds local time and mbedTLS reads it as UTC. Every curl handle that verifies certificates calls `net::useLocalClock`, so a certificate counts as valid when it is valid in some time zone.
 - All of the process's socket calls share one network service session, served one request at a time, so a thread waiting inside the service stalls every other thread. The console links `poll()` through `net::pollInSteps` (`-Wl,--wrap=poll`), so it never waits there; keep sockets non-blocking and wait with `poll()`, never in a blocking `recv`, `accept` or `connect`.
