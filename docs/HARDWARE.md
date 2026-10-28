@@ -133,7 +133,9 @@ installed, and a game older than the installed version.
     `sdmc:/3ds/3dsDL/seeds/<title id>.dat` and once from Nintendo's server.
 32. Installing the same version again works, or asks to replace it. Note
     which one, and whether the save survives REPLACE. An older version asks
-    first and warns about save data.
+    first and warns about save data. A CIA that shares an installed
+    title's ID under another name, like a ROM hack, asks to replace the
+    installed one by name, showing both names.
 33. An update and a DLC install over their game, and LAUNCH opens the game.
 34. An install has no Cancel, B does nothing and HOME is held back until it
     ends. Stopping one used to leave the SD card unreadable until a restart

@@ -5,6 +5,7 @@
 #include "finalize.hpp"
 #include "fs_util.hpp"
 #include "installer.hpp"
+#include "library.hpp"
 #include "logging.hpp"
 #include "naming.hpp"
 #include "ntp.hpp"
@@ -91,9 +92,11 @@ std::string entryName(const HistoryEntry &entry)
 // Before a title is removed to put another copy in its place, its save goes
 // to Checkpoint's folder, the way Restore keeps what was there: removing a
 // title can take its save with it. False when the person would rather stop.
-// note says where the backup went, for the end of the install.
-bool saveBeforeRemoving(const cia::Info &info, const std::string &name,
-                        uint16_t installedVersion, std::string &note)
+// note says where the backup went, for the end of the install. installed
+// is the icon of the software there now, which names the backup.
+bool saveBeforeRemoving(const cia::Info &info, const smdh::Info &installed,
+                        const std::string &name, uint16_t installedVersion,
+                        std::string &note)
 {
     titles::Title title;
     title.id = info.titleId;
@@ -102,9 +105,9 @@ bool saveBeforeRemoving(const cia::Info &info, const std::string &name,
                       : titles::Place::SdCard;
     title.version = installedVersion;
     title.name = name;
-    title.englishShortName = !info.smdh.englishShortName.empty()
-                                 ? info.smdh.englishShortName
-                                 : info.smdh.shortName;
+    title.englishShortName = !installed.englishShortName.empty()
+                                 ? installed.englishShortName
+                                 : installed.shortName;
     if (!savedata::unsupportedReason(title).empty()) {
         return true; // nothing 3dsDL can keep, such as DSiWare
     }
@@ -131,7 +134,7 @@ bool saveBeforeRemoving(const cia::Info &info, const std::string &name,
     dialog.title = "The save of " + name + " could not be backed up. "
                    "Replacing may lose it.";
     dialog.tone = ui::Tone::Warning;
-    dialog.icon = ui::showIcon(info.smdh.icon);
+    dialog.icon = ui::showIcon(installed.icon);
     dialog.body.push_back({saved.message, ui::color::Text, 0.48f, 3});
     dialog.buttons = {"Continue Anyway", "Cancel"};
     dialog.dangerous = 0;
@@ -977,19 +980,38 @@ bool App::installCia(const std::string &path, const cia::Info &info,
     uint16_t installed = 0;
     const bool isInstalled = installer::installedVersion(info.titleId,
                                                          installed);
+    // Whatever shares the file's title ID gets replaced, and ROM hacks often
+    // share their game's, so the installed software is named by its own
+    // icon when it has one.
+    smdh::Info current = info.smdh;
+    smdh::Info found;
+    if (isInstalled &&
+        library::titleSmdh(info.titleId, installer::destination(info.titleId),
+                           found) &&
+        !found.shortName.empty()) {
+        current = std::move(found);
+    }
+    const bool otherSoftware = !info.smdh.shortName.empty() &&
+                               current.shortName != info.smdh.shortName;
+    const std::string currentName =
+        current.shortName.empty() ? name : current.shortName;
     // sameVersion asks gently and starts on Reinstall: installing that
     // version again was asked for. Going back a version is the risky one.
     const auto confirmReplace = [&](const std::string &title,
                                     bool sameVersion = false) {
+        const auto named = [&](const std::string &software, uint16_t version) {
+            const std::string number = screens::titleVersion(info.titleId, version);
+            return otherSoftware ? software + ", " + number : number;
+        };
         ui::Dialog dialog;
         dialog.header = "install";
         dialog.title = title;
         dialog.tone = sameVersion ? ui::Tone::Info : ui::Tone::Warning;
-        dialog.icon = ui::showIcon(info.smdh.icon);
-        dialog.body.push_back({"Installed: " + screens::titleVersion(info.titleId, installed) +
-                                   "\nThis file: " +
-                                   screens::titleVersion(info.titleId, info.version),
-                               ui::color::Text, 0.48f, 2});
+        dialog.icon = ui::showIcon(current.icon);
+        dialog.body.push_back({"Installed: " + named(currentName, installed) +
+                                   "\nThis file: " + named(name, info.version),
+                               ui::color::Text, 0.48f,
+                               static_cast<size_t>(otherSoftware ? 4 : 2)});
         if (sameVersion) {
             dialog.buttons = {"Reinstall", "Keep Installed"};
             dialog.initial = 0;
@@ -1007,7 +1029,14 @@ bool App::installCia(const std::string &path, const cia::Info &info,
     const bool isRunning = R_SUCCEEDED(APT_GetProgramID(&running)) &&
                            running == info.titleId;
     bool removeFirst = false;
-    if (isInstalled && installed == info.version) {
+    if (otherSoftware && !isRunning) {
+        if (!confirmReplace("Replace " + currentName + "?")) {
+            return false;
+        }
+        // AM takes a newer version in its place. The same or an older one
+        // has to be removed first.
+        removeFirst = installed >= info.version;
+    } else if (isInstalled && installed == info.version) {
         // AM answers 0xC8E083FC to the same version, after the whole file.
         bool reinstall = false;
         if (isRunning) {
@@ -1069,7 +1098,8 @@ bool App::installCia(const std::string &path, const cia::Info &info,
     bool saveKept = false;
     while (ui::keepRunning()) {
         if (removeFirst && !saveKept) {
-            if (!saveBeforeRemoving(info, name, installed, saveNote)) {
+            if (!saveBeforeRemoving(info, current, currentName, installed,
+                                    saveNote)) {
                 return false;
             }
             saveKept = true;
@@ -1077,7 +1107,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         if (removeFirst) {
             std::string error;
             if (!installer::removeTitle(info.titleId, error)) {
-                ui::message("Could not replace " + name, error,
+                ui::message("Could not replace " + currentName, error,
                             ui::Tone::Error);
                 return false;
             }
@@ -1088,7 +1118,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
             result.versionRefused && isInstalled && !removeFirst &&
             !isRunning &&
             ui::keepRunning() &&
-            confirmReplace(name + " is already installed")) {
+            confirmReplace(currentName + " is already installed")) {
             removeFirst = true;
             continue;
         }

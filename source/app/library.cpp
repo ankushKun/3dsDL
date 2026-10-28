@@ -36,6 +36,8 @@ bool readSmdh(Handle file, smdh::Info &info)
     return ok;
 }
 
+} // namespace
+
 // The icon in a title's ExeFS, the way FBI reads it.
 bool titleSmdh(uint64_t titleId, FS_MediaType media, smdh::Info &info)
 {
@@ -53,6 +55,8 @@ bool titleSmdh(uint64_t titleId, FS_MediaType media, smdh::Info &info)
     }
     return readSmdh(file, info);
 }
+
+namespace {
 
 FS_ExtSaveDataInfo extDataInfo(uint64_t id)
 {
