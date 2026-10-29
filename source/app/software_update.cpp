@@ -367,7 +367,7 @@ void App::installUpdate(const update::Release &release)
     request.freeSpace = [](const std::string &) {
         return platform::sdFreeBytes();
     };
-    const net::Result result = tasks::download(request, settings_.keepAwake);
+    const net::Result result = tasks::download(request);
     if (result.outcome == net::Outcome::Cancelled || !ui::keepRunning()) {
         return;
     }
@@ -436,7 +436,7 @@ void App::installUpdate(const update::Release &release)
         }
         const installer::Result installed =
             tasks::install(placed.path, info.titleId, "3dsDL " + release.version,
-                           settings_.keepAwake, info.smdh.icon);
+                           info.smdh.icon);
         fs::removeFile(placed.path);
         if (installed.outcome != installer::Outcome::Installed) {
             if (installed.outcome == installer::Outcome::Failed) {

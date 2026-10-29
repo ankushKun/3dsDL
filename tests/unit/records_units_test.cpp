@@ -64,7 +64,6 @@ TEST("records: settings round trip and defaults")
     Settings settings;
     settings.destination = "sdmc:/cias/";
     settings.resumeDownloads = false;
-    settings.keepAwake = false;
     settings.offerZipExtraction = true;
     settings.checkForUpdates = false;
     settings.sounds = false;
@@ -73,7 +72,6 @@ TEST("records: settings round trip and defaults")
     CHECK_EQ(parsed.sounds, false);
     CHECK_EQ(parsed.destination, std::string("sdmc:/cias/"));
     CHECK_EQ(parsed.resumeDownloads, false);
-    CHECK_EQ(parsed.keepAwake, false);
     CHECK_EQ(parsed.offerZipExtraction, true);
     CHECK(parsed.afterCiaDownload == CiaAction::Ask);
 

@@ -2132,8 +2132,7 @@ bool App::deleteEntries(const std::vector<std::string> &paths)
                 }
             }
             return all;
-        },
-        settings_.keepAwake);
+        });
 
     // Copied entries that no longer exist cannot be pasted.
     fileops::Lookup lookup;
@@ -2285,8 +2284,7 @@ bool App::pasteInto(const std::string &folder)
                     }
                 }
                 return all;
-            },
-            settings_.keepAwake);
+            });
     }
 
     // Moved items are no longer where the clipboard points; anything that

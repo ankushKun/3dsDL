@@ -1,4 +1,5 @@
 #include "app.hpp"
+#include "awake.hpp"
 #include "crash.hpp"
 #include "installer.hpp"
 #include "logging.hpp"
@@ -78,6 +79,8 @@ struct Services {
         // Without the DSP firmware dump there are no sounds, which is fine.
         sound::init();
 
+        awake::init();
+
         const CURLcode code = curl_global_init(CURL_GLOBAL_DEFAULT);
         if (code != CURLE_OK) {
             error = std::string("Starting libcurl failed: ") +
@@ -90,6 +93,7 @@ struct Services {
 
     ~Services()
     {
+        awake::exit();
         sound::exit();
         installer::exit();
         if (curl) {

@@ -2,7 +2,7 @@
 
 ## Downloading
 
-Pick **Scan QR Code** or **Enter URL** on the home screen, check the link and folder, and press **Download**. <kbd>B</kbd> cancels at any time. If the connection drops, **Retry** continues from where it stopped, and History can resume it later, as long as the server confirms the file hasn't changed.
+Pick **Scan QR Code** or **Enter URL** on the home screen, check the link and folder, and press **Download**. <kbd>B</kbd> cancels at any time. Closing the lid turns the screens off and the download keeps going; the console sleeps half a minute after it ends. If the connection drops, **Retry** continues from where it stopped, and History can resume it later, as long as the server confirms the file hasn't changed.
 
 If a file with the same name is already there, you choose **Keep Both**, **Replace** or **Cancel**. When a CIA finishes, you can install it, install it and delete the file, or keep it; Settings can make that choice automatic. A CIA that doesn't fit on the SD card can be installed directly: it streams into the install service without being saved, and starts over if the connection drops.
 
@@ -27,7 +27,7 @@ The page's **Files** tab is a file manager for the SD card, with no FTP app need
 
 The page follows the console: a status at the top says when it is waiting for you to choose on the 3DS, installing or downloading, and how that ended. Tap a file for its details, with the real icon, title, title ID and version for CIAs and homebrew. Uploads sit at the top of the list, with each file shown as soon as it arrives. There is a filter, hidden files, select all, a picture viewer, keyboard shortcuts on a computer, and a warning before you change `boot.firm`, `luma` or `Nintendo 3DS`.
 
-One transfer runs at a time, and the console shows it on the touch screen and stays out of Sleep Mode until it ends. Uploads go to a hidden `.3dsdl-upload.part` file and only take their real name once every byte has arrived. From a computer, `curl` works too:
+One transfer runs at a time, and the console shows it on the touch screen. While the page is sending, reading or comparing files the console stays out of Sleep Mode, also with the lid closed and between the files of a batch, and sleeps half a minute after the last request. Uploads go to a hidden `.3dsdl-upload.part` file and only take their real name once every byte has arrived. From a computer, `curl` works too:
 
 ```sh
 curl -T game.cia -H 'X-Requested-With: 3dsDL' 'http://192.168.1.20/api/file?path=/cia/game.cia'
@@ -69,7 +69,6 @@ Everything also works by touch, and lists scroll with a flick.
 | --- | --- | --- |
 | Downloads → Resume Downloads | On | Keeps partial downloads to continue later |
 | Downloads → Max Connections | 4 | The most connections one download is split across, 1 to 4; lower it for servers that refuse several |
-| Downloads → Stay Awake | On | Pauses Sleep Mode so closing the lid doesn't stop Wi-Fi |
 | Downloads → Ask to Extract ZIPs | Off | Asks to extract a ZIP after it downloads |
 | Downloads → After a CIA Downloads | Ask Each Time | Ask, install, install and delete, or keep |
 | Updates → Check at Startup | On | Looks for a new 3dsDL when it opens |

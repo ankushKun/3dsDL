@@ -61,8 +61,11 @@ and (on New 3DS) CPU speed.
     end.
 13. Cancelling asks first; "KEEP GOING" continues, "STOP" removes the partial
     file.
-14. Close the lid during a download with "Stay awake" on: the download keeps
-    going. With it off: the download fails and offers RETRY.
+14. Close the lid during a download: the screens go dark within a quarter
+    second and the download keeps going. Open it: the screens light again.
+    Close it once more and wait past the end: the console sleeps about 30 s
+    after the download ends (log.txt: lid.closed, lid.opened, lid.sleep).
+    Run a queue of three with the lid closed: all three finish.
 15. Use `drop_at` on the fixture server with a file under 1 MiB, which uses
     one connection: the failure says the connection dropped and RETRY
     continues from the partial size ("Continuing from…"). With a larger file
@@ -212,6 +215,11 @@ with a few hundred files.
 58b. Upload a CIA of 1 GiB or more from a phone and from a computer: the
     touch screen shows progress, the console does not sleep with the lid
     closed, and the file's SHA-256 matches. Note the speed.
+58b2. Upload a folder of a few thousand small files from a computer and close
+    the lid partway (issue #13): every file arrives, the screens light when
+    the lid opens, and with the lid left closed the console sleeps about
+    30 s after the last file. Leave the page open and idle with the lid
+    closed: the console still sleeps (the status poll does not count).
 58c. With Offer to Install ticked, uploading two CIAs asks once on the
     console and installs both.
 58d. Download, rename, move, delete and edit a text file from the page, and
@@ -244,6 +252,17 @@ with a few hundred files.
     unavailable and nothing else changes.
 
 ## Results so far
+
+On 2026-10-29 test builds 0.8.3-beta.1 and beta.2 ran on a New 3DS
+(11.17.0-50U) for issue #13.
+
+- 14 in part: with beta.1 the lid closed during a 100 MiB download from
+  proof.ovh.net with 4 connections, the screens went dark and the console
+  stayed awake, but the download failed two seconds later with curl error
+  7: refusing sleep does not stop NDM dropping Wi-Fi for StreetPass. With
+  beta.2, which also holds NDM's infrastructure state, the download kept
+  going with the lid closed. The sleep after 30 s and a queue were not
+  tried.
 
 On 2026-10-12 the 0.3.0 build was confirmed on a console for downloads over
 the internet (items 11 and 12), installing the CIA with FBI, and ZIP

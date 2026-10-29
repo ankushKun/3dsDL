@@ -46,6 +46,7 @@ A Nintendo 3DS homebrew app (C++17, libctru, citro2d) that downloads files, inst
 
 ## Hardware pitfalls
 
+- A closed lid ends Wi-Fi twice over: sleep turns it off, and even with sleep refused NDM drops the connection for StreetPass unless its infrastructure state is held and locked. Work that has to outlast a closed lid holds an `awake::Hold` (`source/app/awake`), which does both, darkens the screens while the lid is shut and keeps the console up for 30 s after the last hold; `tasks::download`, `extract`, `install` and `fileOperation` already hold one. Never call `aptSetSleepAllowed` directly.
 - Using a new libctru service or hardware block needs `resources/3dsDL.rsf` updated in the same change. Azahar does not enforce the RSF, so a missing entry only crashes the CIA on a console.
 - Azahar has no real system font, so text widths there are not the console's.
 - The console clock holds local time and mbedTLS reads it as UTC. Every curl handle that verifies certificates calls `net::useLocalClock`, so a certificate counts as valid when it is valid in some time zone.

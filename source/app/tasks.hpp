@@ -14,14 +14,16 @@
 #include <vector>
 
 // Runs long jobs on a worker thread while the main thread keeps drawing the
-// progress screen and reading the cancel button.
+// progress screen and reading the cancel button. Downloads, extractions,
+// installs and file jobs hold the console awake (awake::Hold), so closing the
+// lid never stops them.
 namespace tasks {
 
 // step is shown after the title, e.g. "2 of 5" in a queue. direct says the
 // data goes straight into an install (request.write) instead of a file.
 // Once installStarted returns true, the download cannot be stopped, like
 // install below.
-net::Result download(const net::Request &request, bool keepAwake,
+net::Result download(const net::Request &request,
                      const std::string &step = "", bool direct = false,
                      std::function<bool()> installStarted = nullptr);
 
@@ -30,13 +32,13 @@ net::Result download(const net::Request &request, bool keepAwake,
 archives::Result extract(const std::string &path,
                          const archives::Listing &listing,
                          const std::string &folder,
-                         const archives::Options &options, bool keepAwake);
+                         const archives::Options &options);
 
 // Installs the CIA at path. name is shown while it runs. It cannot be
 // stopped, and HOME waits until it ends: cancelling an install on a console
 // left its SD card unreadable until a restart (issue #15).
 installer::Result install(const std::string &path, uint64_t titleId,
-                          const std::string &name, bool keepAwake,
+                          const std::string &name,
                           const std::vector<uint16_t> &icon = {});
 
 // Runs a copy, move or delete on the worker thread with a progress screen.
@@ -45,8 +47,7 @@ installer::Result install(const std::string &path, uint64_t titleId,
 fileops::Result fileOperation(
     const std::string &header, const std::string &title,
     const std::string &folder, uint64_t total, bool countsFiles,
-    const std::function<fileops::Result(fileops::Observer &)> &work,
-    bool keepAwake);
+    const std::function<fileops::Result(fileops::Observer &)> &work);
 
 // Starts entry on a worker thread the way every job here runs: on the New
 // 3DS's third core when there is one, otherwise just below the main thread.

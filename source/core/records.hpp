@@ -25,7 +25,6 @@ constexpr int MaxDownloadConnections = 4;
 struct Settings {
     std::string destination = "sdmc:/";
     bool resumeDownloads = true;
-    bool keepAwake = true;
     bool offerZipExtraction = false;
     CiaAction afterCiaDownload = CiaAction::Ask;
     // The most connections one download opens, 1 to MaxDownloadConnections.

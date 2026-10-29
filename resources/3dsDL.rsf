@@ -140,6 +140,8 @@ AccessControlInfo:
     - dsp::DSP
     - fs:USER
     - gsp::Gpu
+    # Dark screens while the lid is closed during work.
+    - gsp::Lcd
     # Starting .3dsx files through Luma3DS's homebrew loader.
     - hb:ldr
     - hid:USER

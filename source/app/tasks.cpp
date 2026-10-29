@@ -1,6 +1,7 @@
 #include "tasks.hpp"
 
 #include "app_util.hpp"
+#include "awake.hpp"
 #include "cia.hpp"
 #include "crash.hpp"
 #include "logging.hpp"
@@ -31,27 +32,6 @@ public:
 
 private:
     LightLock &lock_;
-};
-
-// Keeps the console out of sleep mode for as long as it exists. Sleep turns
-// Wi-Fi off, which would break the transfer.
-class StayAwake {
-public:
-    explicit StayAwake(bool active) : active_(active)
-    {
-        if (active_) {
-            aptSetSleepAllowed(false);
-        }
-    }
-    ~StayAwake()
-    {
-        if (active_) {
-            aptSetSleepAllowed(true);
-        }
-    }
-
-private:
-    bool active_;
 };
 
 // The worker runs one step below the main thread's priority so drawing and
@@ -430,7 +410,7 @@ bool busy(const std::string &header, const std::string &title,
     return logged();
 }
 
-net::Result download(const net::Request &request, bool keepAwake,
+net::Result download(const net::Request &request,
                      const std::string &step, bool direct,
                      std::function<bool()> installStarted)
 {
@@ -438,7 +418,7 @@ net::Result download(const net::Request &request, bool keepAwake,
     job.request = &request;
     job.installStarted = std::move(installStarted);
 
-    StayAwake awake(keepAwake);
+    awake::Hold hold;
     Thread thread = startWorkerThread(runDownload, &job, "download");
     if (thread == nullptr) {
         job.result.message = "Could not start the download thread.";
@@ -519,7 +499,7 @@ net::Result download(const net::Request &request, bool keepAwake,
 archives::Result extract(const std::string &path,
                          const archives::Listing &listing,
                          const std::string &folder,
-                         const archives::Options &options, bool keepAwake)
+                         const archives::Options &options)
 {
     ExtractJob job;
     job.path = path;
@@ -546,7 +526,7 @@ archives::Result extract(const std::string &path,
     }
     const uint64_t totalWork = totalBytes + totalFiles * FileWeight;
 
-    StayAwake awake(keepAwake);
+    awake::Hold hold;
     Thread thread = startWorkerThread(runExtract, &job, "extract");
     if (thread == nullptr) {
         job.result.message = "Could not start the extraction thread.";
@@ -630,14 +610,14 @@ archives::Result extract(const std::string &path,
 }
 
 installer::Result install(const std::string &path, uint64_t titleId,
-                          const std::string &name, bool keepAwake,
+                          const std::string &name,
                           const std::vector<uint16_t> &icon)
 {
     InstallJob job;
     job.path = path;
     job.titleId = titleId;
 
-    StayAwake awake(keepAwake);
+    awake::Hold hold;
     Thread thread = startWorkerThread(runInstall, &job, "install");
     if (thread == nullptr) {
         job.result.message = "Could not start the install thread.";
@@ -694,14 +674,13 @@ installer::Result install(const std::string &path, uint64_t titleId,
 fileops::Result fileOperation(
     const std::string &header, const std::string &title,
     const std::string &folder, uint64_t total, bool countsFiles,
-    const std::function<fileops::Result(fileops::Observer &)> &work,
-    bool keepAwake)
+    const std::function<fileops::Result(fileops::Observer &)> &work)
 {
     FileJob job;
     job.work = &work;
     job.total = total;
 
-    StayAwake awake(keepAwake);
+    awake::Hold hold;
     Thread thread = startWorkerThread(runFileJob, &job, "files");
     if (thread == nullptr) {
         job.result.status = fileops::Status::Failed;

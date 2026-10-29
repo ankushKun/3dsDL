@@ -584,8 +584,7 @@ void App::dataBrowser(const savedata::Target &target)
                     }
                 }
                 return outcome;
-            },
-            settings_.keepAwake);
+            });
         if (copied.status == fileops::Status::Ok) {
             ui::message("Copied",
                         "Copied to " + (into.empty() ? last : destination) + ".",

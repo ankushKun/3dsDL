@@ -1,6 +1,7 @@
 #include "app.hpp"
 
 #include "app_util.hpp"
+#include "awake.hpp"
 #include "cia.hpp"
 #include "crash.hpp"
 #include "finalize.hpp"
@@ -27,6 +28,7 @@
 #include <atomic>
 #include <cstdio>
 #include <deque>
+#include <optional>
 #include <set>
 
 // The download queue, receiving links and files from other devices on the
@@ -92,6 +94,10 @@ struct ReceiveJob {
     bool transferring = false;
     std::string lastFile;
     net::ConsoleStatus status;
+    // Requests being served, all but the page's status poll, and how many
+    // have started, so one that comes and goes between frames counts too.
+    std::atomic<int> requests {0};
+    std::atomic<uint32_t> started {0};
 
     ReceiveJob() { LightLock_Init(&lock); }
 
@@ -315,8 +321,7 @@ void App::runQueue(const std::vector<uint64_t> *ids)
         };
         const std::string step = std::to_string(position + 1) + " of " +
                                  std::to_string(order.size());
-        const net::Result result =
-            tasks::download(request, settings_.keepAwake, step);
+        const net::Result result = tasks::download(request, step);
         if (!ui::keepRunning()) {
             return;
         }
@@ -567,6 +572,14 @@ void App::receiveScreen()
     sharing.progress = [&job](const net::Transfer &transfer) {
         job.progress(transfer);
     };
+    sharing.working = [&job](bool starting) {
+        if (starting) {
+            ++job.requests;
+            ++job.started;
+        } else {
+            --job.requests;
+        }
+    };
     // Room for the network to keep filling while an upload's last piece is
     // written to the SD card, so the sender is not told to wait.
     sharing.socketBufferSize = 128 * 1024;
@@ -615,7 +628,8 @@ void App::receiveScreen()
     const QrCode code(page);
     std::string last;
     bool backPressed = false;
-    bool awake = false;
+    std::optional<awake::Hold> keptAwake;
+    uint32_t requestsSeen = 0;
     units::RateMeter meter;
     std::string meterName;
     const ui::Rect back = ui::tabRect(ui::Tab::Left);
@@ -816,10 +830,18 @@ void App::receiveScreen()
         if (!lastFile.empty()) {
             last = lastFile;
         }
-        // Sleep turns Wi-Fi off, which would cut the transfer.
-        if (busy != awake) {
-            awake = busy;
-            aptSetSleepAllowed(!awake);
+        // Someone using the page holds the console awake, and the linger
+        // after each request covers the gap before the next, so closing the
+        // lid never cuts a batch off between files (issue #13).
+        const uint32_t started = job.started.load();
+        const bool inUse = job.requests.load() > 0 || started != requestsSeen;
+        requestsSeen = started;
+        if (inUse != keptAwake.has_value()) {
+            if (keptAwake) {
+                keptAwake.reset();
+            } else {
+                keptAwake.emplace();
+            }
         }
         if (busy && transfer.name != meterName) {
             meter.reset();
@@ -935,9 +957,6 @@ void App::receiveScreen()
         threadJoin(mdnsThread, U64_MAX);
         threadFree(mdnsThread);
     }
-    if (awake) {
-        aptSetSleepAllowed(true);
-    }
     // Senders still waiting are told the links are done, so they exit.
     net::Received pending;
     while (job.take(pending)) {
@@ -971,7 +990,7 @@ void App::installDirectly(const std::string &address)
                    : static_cast<size_t>(0);
     };
     const net::Result result =
-        tasks::download(request, settings_.keepAwake, "", true,
+        tasks::download(request, "", true,
                         [&sink]() { return sink.started(); });
     if (!result.partPath.empty()) {
         fs::removeFile(result.partPath); // empty: the data went to the install

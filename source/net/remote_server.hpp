@@ -72,6 +72,11 @@ struct FileSharing {
     std::string appVersion;
     // Called a few times a second during a transfer, on the server's thread.
     std::function<void(const Transfer &)> progress;
+    // Called with true as a request starts and false as it ends, on the
+    // server's thread, for every request but the page's status poll, which
+    // runs for as long as the page is open. The app keeps the console awake
+    // for them.
+    std::function<void(bool)> working;
     int socketBufferSize = 0; // asked for on each connection when not 0
     // Where uploads are written until they are complete, then moved into
     // place. Empty uses the destination's own folder. A small folder here

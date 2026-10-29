@@ -502,6 +502,39 @@ TEST("remote server: a stopping listener gives up an upload part way")
     CHECK(!fs::fileExists(root.path + "/.3dsdl-upload.part"));
 }
 
+TEST("remote server: every request but the status poll counts as working")
+{
+    TempRoot root;
+    std::atomic<int> started {0};
+    std::atomic<int> ended {0};
+    net::FileSharing sharing;
+    sharing.root = root.path;
+    sharing.working = [&](bool on) { ++(on ? started : ended); };
+    net::Receiver receiver;
+    std::string error;
+    CHECK(receiver.open(0, 0, 0, error));
+    receiver.shareFiles(sharing);
+    Serving serving(receiver);
+    const unsigned short port = receiver.webPort();
+    // The end is reported once the answer has gone, so it can trail it.
+    const auto settled = [&](int count) {
+        for (int wait = 0; wait < 100 && ended.load() != count; ++wait) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        return started.load() == count && ended.load() == count;
+    };
+
+    // An open page polls its status for as long as it is open.
+    CHECK(startsWith(get(port, "/api/status"), "HTTP/1.1 200"));
+    CHECK(settled(0));
+    CHECK(startsWith(get(port, "/api/list?path=%2F"), "HTTP/1.1 200"));
+    CHECK(settled(1));
+    CHECK(startsWith(put(port, "/api/file?path=%2Fa.bin", "x"), "HTTP/1.1 200"));
+    CHECK(settled(2));
+    CHECK(startsWith(get(port, "/"), "HTTP/1.1 200"));
+    CHECK(settled(3));
+}
+
 TEST("remote server: the file API turns away what it should")
 {
     TempRoot root;

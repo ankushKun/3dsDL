@@ -1,6 +1,7 @@
 #include "app.hpp"
 
 #include "app_util.hpp"
+#include "awake.hpp"
 #include "cia.hpp"
 #include "finalize.hpp"
 #include "fs_util.hpp"
@@ -174,6 +175,7 @@ App::App()
     }
     startIndexLoad();
     ui::setFrameHook([this]() {
+        awake::update();
         pollUpdate();
         pollLibrary();
         pollIndex();
@@ -394,8 +396,7 @@ App::Start App::startDownload(const std::string &address, std::string folder)
             return platform::sdFreeBytes();
         };
 
-        const net::Result result = tasks::download(request,
-                                                   settings_.keepAwake);
+        const net::Result result = tasks::download(request);
         if (!ui::keepRunning()) {
             if (result.resumable) {
                 HistoryEntry entry =
@@ -794,8 +795,7 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
 
     const uint64_t started = osGetTime();
     const archives::Result result = tasks::extract(path, listing, target,
-                                                   options,
-                                                   settings_.keepAwake);
+                                                   options);
     const uint64_t seconds = (osGetTime() - started) / 1000;
     if (options.existing == archives::Existing::Overwrite) {
         // Files replaced at the same size would keep their old dates.
@@ -865,8 +865,7 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
     options.existing = archives::Existing::Overwrite;
     options.only = result.skippedExisting;
     const archives::Result replaced = tasks::extract(path, listing, target,
-                                                     options,
-                                                     settings_.keepAwake);
+                                                     options);
     fileIndex_.rewritten(landed);
     sdChanged(target);
     if (!ui::keepRunning()) {
@@ -1112,8 +1111,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
                 return false;
             }
         }
-        result = tasks::install(path, info.titleId, name,
-                                settings_.keepAwake, info.smdh.icon);
+        result = tasks::install(path, info.titleId, name, info.smdh.icon);
         if (result.outcome == installer::Outcome::Failed &&
             result.versionRefused && isInstalled && !removeFirst &&
             !isRunning &&
@@ -1744,7 +1742,6 @@ void App::settingsScreen()
                     {"Resume Downloads", onOff(settings_.resumeDownloads)},
                     {"Max Connections",
                      std::to_string(settings_.maxConnections)},
-                    {"Stay Awake", onOff(settings_.keepAwake)},
                     // It only ever asks, so the name says so.
                     {"Ask to Extract", onOff(settings_.offerZipExtraction)},
                     {"After a CIA Downloads",
@@ -1770,11 +1767,9 @@ void App::settingsScreen()
                         persistSettings();
                     }
                 } else if (index == 2) {
-                    onOffChoice("Stay Awake", settings_.keepAwake);
-                } else if (index == 3) {
                     onOffChoice("Ask to Extract",
                                 settings_.offerZipExtraction);
-                } else if (index == 4) {
+                } else if (index == 3) {
                     const int picked = ui::chooseOption(
                         "After a CIA Downloads",
                         {"Ask Each Time", "Install", "Install and Delete File",
@@ -1878,7 +1873,6 @@ void App::settingsScreen()
                 facts = {{"Resume", onOff(settings_.resumeDownloads)},
                          {"Max Connections",
                           std::to_string(settings_.maxConnections)},
-                         {"Stay Awake", onOff(settings_.keepAwake)},
                          {"Ask to Extract",
                           onOff(settings_.offerZipExtraction)},
                          {"After a CIA",

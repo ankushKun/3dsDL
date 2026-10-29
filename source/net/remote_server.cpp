@@ -1153,6 +1153,21 @@ bool Receiver::serveWeb(int client, const std::string &from, Received &out)
         return false;
     }
 
+    // Everything but the page's status poll is someone using the console.
+    const bool counts = sharing_.working && request.path != "/api/status";
+    if (counts) {
+        sharing_.working(true);
+    }
+    struct Done {
+        const std::function<void(bool)> *report;
+        ~Done()
+        {
+            if (report != nullptr) {
+                (*report)(false);
+            }
+        }
+    } done {counts ? &sharing_.working : nullptr};
+
     const std::string html = "text/html; charset=utf-8";
     bool got = false;
     if (request.path.compare(0, 5, "/api/") == 0) {

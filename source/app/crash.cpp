@@ -1,5 +1,6 @@
 #include "crash.hpp"
 
+#include "awake.hpp"
 #include "crash_log.hpp"
 #include "logging.hpp"
 
@@ -101,6 +102,9 @@ void describe(crashlog::Record &record, const char *what, uint32_t sp)
 // Straight through FS, as stdio would allocate. log.txt gets a line too.
 void save(const crashlog::Record &record)
 {
+    // With the lid closed during work the screens are dark, and the error
+    // screen that follows needs them.
+    awake::lightScreens();
     logging::crashed(record.what, record.thread);
     const size_t length = crashlog::format(record, text, sizeof(text));
     Handle file = 0;
