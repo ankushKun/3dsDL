@@ -62,6 +62,26 @@ Parse parseRequest(const std::string &data, HttpRequest &out,
 // ('+' is a space, %XX a byte), or "" when it is missing.
 std::string formValue(const std::string &form, const std::string &field);
 
+// What a sender is, from its browser's User-Agent: "iPhone", "Mac",
+// "Windows PC" and so on, or "" when it does not say.
+std::string deviceName(const std::string &userAgent);
+
+// Where an upload stands among the files the page sends in one go, from its
+// X-3dsDL-Batch header: "<batch> <position> <count> <before> <bytes>", then,
+// for a file in a folder that was dropped whole, "<files> <folder>" with the
+// folder as a percent-encoded page path.
+struct UploadBatch {
+    std::string id;        // tells one drop from the next; "" for none
+    uint32_t position = 0; // from 1
+    uint32_t count = 0;
+    uint64_t before = 0;   // bytes of the files sent before this one
+    uint64_t bytes = 0;    // bytes of the whole batch
+    std::string folder;    // "/3ds/Checkpoint", "" for a file on its own
+    uint32_t folderFiles = 0; // how many of the batch go into folder
+};
+// False when the header is missing or malformed.
+bool uploadBatch(const HttpRequest &request, UploadBatch &out);
+
 // A whole response with Connection: close.
 std::string httpResponse(int status, const std::string &contentType,
                          const std::string &body);

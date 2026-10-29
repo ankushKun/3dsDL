@@ -202,9 +202,12 @@ with a few hundred files.
 53. Scan three QR codes with Add to Queue: the camera comes back after each,
     Home shows 3 on Queue, and Download All fetches them in order.
 54. Receive shows the console's address and a QR code. A phone that scans it
-    gets the page; links pasted there arrive and download.
-55. servefiles.py from a computer sends a CIA to port 5000: it downloads and
-    installs, and servefiles.py exits by itself afterwards.
+    gets the page; links pasted there arrive and download, and stay listed
+    on the touch screen with how they went after Receive goes back to
+    waiting, and after leaving Receive and coming back.
+55. servefiles.py from a computer sends two CIAs to the address Receive
+    shows: Install puts both on without keeping a copy, the list shows them
+    Installed, and servefiles.py exits by itself afterwards.
 56. Fill the SD card until a CIA does not fit: the error offers Install
     Directly, the CIA installs, and nothing is left on the card.
 57. Install Directly of an older version than the installed one is refused
@@ -213,10 +216,11 @@ with a few hundred files.
 58a. Files on the Receive page: the console asks Allow or Don't Allow for
     the phone; Don't Allow keeps the page waiting until Receive reopens.
 58b. Upload a CIA of 1 GiB or more from a phone and from a computer: the
-    touch screen shows progress, the console does not sleep with the lid
+    top screen and its row show progress, the console does not sleep with the lid
     closed, and the file's SHA-256 matches. Note the speed.
 58b2. Upload a folder of a few thousand small files from a computer and close
-    the lid partway (issue #13): every file arrives, the screens light when
+    the lid partway (issue #13): every file arrives, as one row for the
+    folder, the screens light when
     the lid opens, and with the lid left closed the console sleeps about
     30 s after the last file. Leave the page open and idle with the lid
     closed: the console still sleeps (the status poll does not count).
@@ -228,8 +232,8 @@ with a few hundred files.
     the next upload works.
 58f. http://3ds.local/ opens on a Mac or iPhone and on Windows; with two
     consoles on Receive the second answers to 3ds-2.local. Record whether
-    the console joined the multicast group at all (the line about .local
-    is missing from the top screen if it did not).
+    the console joined the multicast group at all (http://3ds.local is
+    missing under the address if it did not).
 
 ### Saves, tickets and sounds
 

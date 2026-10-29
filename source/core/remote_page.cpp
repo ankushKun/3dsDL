@@ -281,14 +281,12 @@ kbd{font:600 11px ui-monospace,monospace;background:#fffdf0;border:1px solid #d6
 <nav class="tabs" id="tabs"><span class="ink" id="ink"></span><a href="#links" id="t-links" class="on">Links</a><a href="#files:%2F" id="t-files">Files</a></nav>
 <div class="banner" id="offline" hidden><span class="spin"></span><span>Can't reach the 3DS. Keep 3dsDL open on Receive; this page reconnects by itself.</span></div>
 <section id="links">
-<p>Paste one or more direct download links. They go to the 3DS, which downloads them one after another.</p>
 )PAGE";
 
 const char *const PageEnd = R"PAGE(<form method="post" action="/send" class="panel" id="sendform">
 <textarea name="links" id="linkbox" placeholder="https://..." autofocus required></textarea>
 <div class="formrow"><span class="count" id="linkcount"></span><button class="btn primary" type="submit" id="sendbtn">Send to 3DS</button></div></form>
 <ul class="sent" id="sent"></ul>
-<small>Only links are sent. Keep 3dsDL on the Receive screen while you send.</small>
 </section>
 <section id="files" hidden>
 <div id="gate" class="panel gate" hidden></div>
@@ -314,7 +312,7 @@ const char *const PageEnd = R"PAGE(<form method="post" action="/send" class="pan
 <div class="listwrap"><div class="loadline" id="loadline"></div>
 <div class="listhead"><input type="checkbox" id="all" aria-label="Select all"><span id="count"></span></div>
 <ul class="list" id="list"></ul></div>
-<small class="hint">Drop files or folders anywhere on this page to upload them here. <span class="keys"><kbd>/</kbd> filter, <kbd>Backspace</kbd> up, <kbd>Del</kbd> delete, <kbd>F2</kbd> rename, <kbd>Ctrl</kbd>+<kbd>A</kbd> select all.</span></small>
+<small class="hint"><span class="keys"><kbd>/</kbd> filter, <kbd>Backspace</kbd> up, <kbd>Del</kbd> delete, <kbd>F2</kbd> rename, <kbd>Ctrl</kbd>+<kbd>A</kbd> select all.</span></small>
 </div>
 </section>
 </main>
@@ -400,11 +398,14 @@ function when(t) {
   const d = new Date(t * 1e3), z = n => String(n).padStart(2, '0');
   return d.getUTCFullYear() + '-' + z(d.getUTCMonth() + 1) + '-' + z(d.getUTCDate()) + ' ' + z(d.getUTCHours()) + ':' + z(d.getUTCMinutes());
 }
+// As the console says it (units::timeLeft): counting down under ten
+// seconds, then in fives, then in minutes.
 function duration(s) {
   if (!isFinite(s) || s < 0) return '';
-  if (s < 60) return 'about ' + Math.max(1, Math.round(s)) + ' s';
-  if (s < 3600) return 'about ' + Math.round(s / 60) + ' min';
-  return 'about ' + (s / 3600).toFixed(1) + ' h';
+  if (s < 10) return Math.max(1, Math.round(s)) + ' s';
+  if (Math.ceil(s / 5) * 5 < 60) return Math.ceil(s / 5) * 5 + ' s';
+  const m = Math.max(1, Math.round(s / 60));
+  return m < 60 ? m + ' min' : Math.floor(m / 60) + ' h' + (m % 60 ? ' ' + m % 60 + ' min' : '');
 }
 const KINDS = {cia: 'cia', '3dsx': '3dsx', zip: 'zip', '7z': 'zip', rar: 'zip', png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', bmp: 'img', webp: 'img',
   txt: 'txt', ini: 'txt', cfg: 'txt', json: 'txt', xml: 'txt', log: 'txt', md: 'txt', yml: 'txt', yaml: 'txt', lua: 'txt', nds: 'rom', '3ds': 'rom', cci: 'rom',
@@ -1114,7 +1115,7 @@ $('#etext').addEventListener('keydown', e => {
 
 // --- Uploads -----------------------------------------------------------------------
 const U = {items: [], current: null, pill: '', made: new Set(), arrived: [], sent: 0, ms: 0};
-async function plan(files) {
+async function plan(files, into = F.cwd) {
   if (!files.length) return;
   // Folders made for an earlier batch may have been deleted since.
   U.made.clear();
@@ -1143,7 +1144,7 @@ async function plan(files) {
     const names = clash.slice(0, 5).map(f => base(f.path)).join('\n') + (clash.length > 5 ? '\n...and ' + (clash.length - 5) + ' more' : '');
     const stop = {done: false};
     const c = await ask(clash.length === 1 ? 'Replace this file?' : 'Replace ' + clash.length + ' files?',
-      names + '\n\nReplace changed sends only the files whose contents differ. The 3DS checks its own copies, so nothing is sent just to compare.',
+      names,
       {buttons: ['Cancel', 'Skip', 'Replace all', 'Replace changed'], warn: risk(clash.map(f => f.path)), action: () => changed(clash, there, stop)});
     stop.done = true;
     if (c === null || c < 1) return;
@@ -1157,6 +1158,20 @@ async function plan(files) {
   if (F.free >= 0 && need > F.free) return ask('Not enough space', 'These need ' + size(need) + ' and the SD card has ' + size(F.free) + ' free.', {buttons: ['OK']});
   const big = files.find(f => f.file.size > 4294967295);
   if (big) return ask('Too big for the SD card', base(big.path) + " is 4 GiB or more, which the SD card's FAT32 cannot hold.", {buttons: ['OK']});
+  // The console lists what arrives: each file says which drop it is part
+  // of, and a folder dropped whole goes there as one row.
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6), top = into === '/' ? '/' : into + '/', folders = new Map();
+  for (const f of files) {
+    const rel = f.path.startsWith(top) ? f.path.slice(top.length) : '';
+    f.folder = rel.includes('/') ? top + rel.split('/')[0] : '';
+    if (f.folder) folders.set(f.folder, (folders.get(f.folder) || 0) + 1);
+  }
+  const bytes = files.reduce((n, f) => n + f.file.size, 0);
+  let before = 0;
+  files.forEach((f, i) => {
+    f.batch = [id, i + 1, files.length, before, bytes].join(' ') + (f.folder ? ' ' + folders.get(f.folder) + ' ' + enc(f.folder) : '');
+    before += f.file.size;
+  });
   for (const f of files) {
     const li = document.createElement('li');
     li.innerHTML = '<span class="n"></span><div class="track"><div class="fill"></div></div><span class="s">Waiting</span><div></div>';
@@ -1243,7 +1258,7 @@ function progress() {
     panel.classList.add('done');
     $('#uptitle').textContent = !live.length ? 'Uploads stopped'
       : live.length === 1 ? 'Upload finished' : 'All ' + live.length + ' uploads finished';
-    $('#upsub').textContent = failed ? failed + ' did not finish; Retry is next to each.' : size(live.reduce((n, f) => n + f.file.size, 0)) + ' sent';
+    $('#upsub').textContent = failed ? failed + ' did not finish' : size(live.reduce((n, f) => n + f.file.size, 0)) + ' sent';
     $('#upfill').style.width = live.length ? '100%' : '0';
     $('#upcancel').hidden = true;
     $('#upclear').hidden = false;
@@ -1282,6 +1297,7 @@ async function send(f) {
     f.xhr = x;
     x.open('PUT', '/api/file?path=' + enc(f.path) + (f.replace ? '&replace=1' : ''));
     x.setRequestHeader('X-Requested-With', '3dsDL');
+    x.setRequestHeader('X-3dsDL-Batch', f.batch);
     x.upload.onprogress = e => {
       if (!e.lengthComputable) return;
       const now = performance.now();
@@ -1415,7 +1431,7 @@ addEventListener('drop', async e => {
     if (d.entry) await walk(d.entry, into, out);
     else if (d.file) out.push({file: d.file, path: join(into, d.file.name)});
   }
-  plan(out);
+  plan(out, into);
 });
 
 // --- Keys ---------------------------------------------------------------------------

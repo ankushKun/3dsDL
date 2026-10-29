@@ -219,6 +219,87 @@ std::string formValue(const std::string &form, const std::string &field)
     return "";
 }
 
+std::string deviceName(const std::string &userAgent)
+{
+    static const struct {
+        const char *marker;
+        const char *name;
+    } devices[] = {
+        // Nintendo's browsers say "like iPhone", and phones and tablets name
+        // the desktop systems they are built on, so these come first.
+        {"Nintendo 3DS", "3DS"},
+        {"Nintendo Switch", "Switch"},
+        {"iPhone", "iPhone"},
+        {"iPad", "iPad"},
+        {"Android", "Android"},
+        {"CrOS", "Chromebook"},
+        {"Windows", "Windows PC"},
+        {"Macintosh", "Mac"},
+        {"Linux", "Linux PC"},
+        {"curl/", "curl"},
+        {"Wget/", "Wget"},
+    };
+    for (const auto &device : devices) {
+        if (userAgent.find(device.marker) != std::string::npos) {
+            return device.name;
+        }
+    }
+    return "";
+}
+
+bool uploadBatch(const HttpRequest &request, UploadBatch &out)
+{
+    const auto header = request.headers.find("x-3dsdl-batch");
+    if (header == request.headers.end()) {
+        return false;
+    }
+    std::vector<std::string> parts;
+    size_t start = 0;
+    while (start <= header->second.size() && parts.size() < 8) {
+        size_t end = header->second.find(' ', start);
+        if (end == std::string::npos) {
+            end = header->second.size();
+        }
+        parts.push_back(header->second.substr(start, end - start));
+        start = end + 1;
+    }
+    const auto digits = [](const std::string &text, size_t most) {
+        return !text.empty() && text.size() <= most &&
+               text.find_first_not_of("0123456789") == std::string::npos;
+    };
+    const auto count = [&](const std::string &text, uint32_t &value) {
+        value = digits(text, 7)
+                    ? static_cast<uint32_t>(std::strtoul(text.c_str(), nullptr, 10))
+                    : 0;
+        return value > 0;
+    };
+    const auto bytes = [&](const std::string &text, uint64_t &value) {
+        value = std::strtoull(text.c_str(), nullptr, 10);
+        return digits(text, 15);
+    };
+    UploadBatch batch;
+    if ((parts.size() != 5 && parts.size() != 7) || parts[0].empty() ||
+        parts[0].size() > 24 ||
+        parts[0].find_first_not_of("0123456789abcdefghijklmnopqrstuvwxyz") !=
+            std::string::npos ||
+        !count(parts[1], batch.position) || !count(parts[2], batch.count) ||
+        batch.position > batch.count || !bytes(parts[3], batch.before) ||
+        !bytes(parts[4], batch.bytes) || batch.before > batch.bytes) {
+        return false;
+    }
+    batch.id = parts[0];
+    if (parts.size() == 7) {
+        batch.folder = url::percentDecode(parts[6]);
+        if (!count(parts[5], batch.folderFiles) ||
+            batch.folderFiles > batch.count || batch.folder.size() < 2 ||
+            batch.folder[0] != '/') {
+            return false;
+        }
+    }
+    out = batch;
+    return true;
+}
+
 std::string httpResponse(int status, const std::string &contentType,
                          const std::string &body)
 {

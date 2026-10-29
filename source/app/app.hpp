@@ -8,6 +8,7 @@
 #include "library.hpp"
 #include "savedata.hpp"
 #include "platform.hpp"
+#include "receive_log.hpp"
 #include "records.hpp"
 #include "update.hpp"
 
@@ -47,8 +48,13 @@ private:
     Start startDownload(const std::string &address, std::string folder);
     enum class Confirm { Cancel, Download, Queue };
     Confirm confirmDownload(const std::string &address, std::string &folder);
-    // Installs a CIA from the internet without saving it, for a full SD card.
-    void installDirectly(const std::string &address);
+    // Installs a CIA from the internet without saving it, for a full SD card
+    // and for FBI's tools. quiet leaves out the screens that say how it
+    // went, for a caller that shows that itself; message then says why it
+    // failed. Returns Installed, Failed or Cancelled.
+    HistoryStatus installDirectly(const std::string &address,
+                                  bool quiet = false,
+                                  std::string *message = nullptr);
     void finishDownload(const std::string &address, const std::string &folder,
                         const net::Result &result);
     // Asks where to extract an archive, then extracts it. known is a
@@ -77,9 +83,10 @@ private:
 
     // Files, in files.cpp. Paths of entries never end with '/'; folders
     // being browsed always do.
-    // Files, then saves the index if it changed.
-    void filesScreen();
-    void browseFiles();
+    // Files, then saves the index if it changed. select, when given, is the
+    // entry to open Files on, highlighted in its folder.
+    void filesScreen(const std::string &select = "");
+    void browseFiles(const std::string &select = "");
     // folder, when given, is the whole folder path is in, already read and
     // sorted, for the picture viewer's previous and next.
     void openFile(const std::string &path,
@@ -182,10 +189,25 @@ private:
     void addToQueue(const std::vector<std::string> &links,
                     const std::string &folder, bool announce);
     void queueScreen();
+    // How one link of a queue run went: Saved, Installed, Failed or
+    // Cancelled.
+    struct QueueResult {
+        std::string url;
+        HistoryStatus status = HistoryStatus::Failed;
+        std::string name;    // the file's name, once known
+        std::string path;    // where it was saved, when it was
+        uint64_t bytes = 0;
+        std::string message; // why it failed
+    };
     // Downloads the queued links in order, or only those in ids when given,
-    // without stopping to ask. Finished ones leave the queue.
-    void runQueue(const std::vector<uint64_t> *ids = nullptr);
+    // without stopping to ask. Finished ones leave the queue. With results,
+    // how each went goes there instead of into a summary at the end.
+    void runQueue(const std::vector<uint64_t> *ids = nullptr,
+                  std::vector<QueueResult> *results = nullptr);
     void receiveScreen();
+    // A row of Receive's list, opened: its facts, and what can be done with
+    // it. address is the console's, for the top screen.
+    void receivedOptions(net::ReceiveLog::Row row, const std::string &address);
 
     // Software updates, in software_update.cpp.
     void softwareUpdateScreen();
@@ -228,6 +250,8 @@ private:
     titles::Show addOnShow_ = titles::Show::All;
     std::vector<QueuedLink> queue_;
     uint64_t nextQueueId_ = 1;
+    // What Receive has taken in and sent out since 3dsDL started.
+    net::ReceiveLog receiveLog_;
     bool updateAvailable_ = false;
     bool updateNoticeShown_ = false;
     uint32_t updateGeneration_ = 0;

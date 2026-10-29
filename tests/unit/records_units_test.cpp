@@ -3,6 +3,20 @@
 #include "records.hpp"
 #include "units.hpp"
 
+TEST("units: time left reads as an estimate that holds still")
+{
+    CHECK_EQ(units::timeLeft(0), std::string("1 s left"));
+    CHECK_EQ(units::timeLeft(8), std::string("8 s left"));
+    CHECK_EQ(units::timeLeft(11), std::string("15 s left"));
+    CHECK_EQ(units::timeLeft(45), std::string("45 s left"));
+    CHECK_EQ(units::timeLeft(56), std::string("1 min left"));
+    CHECK_EQ(units::timeLeft(89), std::string("1 min left"));
+    CHECK_EQ(units::timeLeft(90), std::string("2 min left"));
+    CHECK_EQ(units::timeLeft(59 * 60 + 29), std::string("59 min left"));
+    CHECK_EQ(units::timeLeft(59 * 60 + 30), std::string("1 h left"));
+    CHECK_EQ(units::timeLeft(80 * 60), std::string("1 h 20 min left"));
+}
+
 TEST("units: byte, rate and duration formatting")
 {
     CHECK_EQ(units::bytes(0), std::string("0 B"));

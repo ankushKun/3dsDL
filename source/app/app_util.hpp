@@ -2,6 +2,7 @@
 
 #include "archives.hpp"
 #include "cia.hpp"
+#include "file_types.hpp"
 #include "fs_util.hpp"
 #include "ui.hpp"
 
@@ -25,6 +26,12 @@ namespace screens {
 
 std::string basename(const std::string &path);
 std::string plural(uint64_t count, const std::string &word);
+// The icon and its colour for a kind of file, as Files shows it.
+struct KindLook {
+    ui::Icon icon;
+    u32 color;
+};
+KindLook lookOf(filetype::Kind kind);
 // Reads what an archive holds behind a busy screen that can stop it.
 // Returns false when it cannot be read, with error empty when it was
 // stopped.

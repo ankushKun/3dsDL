@@ -4,6 +4,7 @@
 #include "awake.hpp"
 #include "cia.hpp"
 #include "crash.hpp"
+#include "file_ops.hpp"
 #include "finalize.hpp"
 #include "fs_util.hpp"
 #include "installer.hpp"
@@ -13,6 +14,7 @@
 #include "naming.hpp"
 #include "platform.hpp"
 #include "qr_code.hpp"
+#include "receive_log.hpp"
 #include "remote.hpp"
 #include "remote_server.hpp"
 #include "storage.hpp"
@@ -27,6 +29,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cstdio>
+#include <ctime>
 #include <deque>
 #include <optional>
 #include <set>
@@ -76,7 +79,7 @@ std::string localAddress()
 constexpr const char *NetworkName = "3ds";
 
 // Listens on a worker thread while the Receive screen is open, and answers
-// for 3ds.local on another.
+// for 3ds.local on another. What they hear waits here for the screen.
 struct ReceiveJob {
     net::Receiver receiver;
     net::MdnsResponder mdns;
@@ -87,12 +90,17 @@ struct ReceiveJob {
     std::deque<net::Received> arrived;
     // Devices that asked to use the SD card: those waiting for an answer
     // on the console, and the answers. They last while Receive is open.
-    std::deque<std::string> asking;
+    struct Asker {
+        std::string from;
+        std::string device;
+    };
+    std::deque<Asker> asking;
     std::set<std::string> allowed;
     std::set<std::string> denied;
-    net::Transfer transfer;
-    bool transferring = false;
-    std::string lastFile;
+    // Progress reports and the paths the page changed, in order, until the
+    // screen takes them.
+    std::deque<net::Transfer> reports;
+    std::deque<std::string> changed;
     net::ConsoleStatus status;
     // Requests being served, all but the page's status poll, and how many
     // have started, so one that comes and goes between frames counts too.
@@ -113,7 +121,7 @@ struct ReceiveJob {
         return any;
     }
 
-    bool takeAsking(std::string &out)
+    bool takeAsking(Asker &out)
     {
         LightLock_Lock(&lock);
         const bool any = !asking.empty();
@@ -133,12 +141,14 @@ struct ReceiveJob {
     }
 
     // Runs on the listener's thread.
-    net::Access access(const std::string &from, bool ask)
+    net::Access access(const std::string &from, const std::string &device,
+                       bool ask)
     {
         LightLock_Lock(&lock);
         net::Access result = net::Access::Pending;
         const bool waiting =
-            std::find(asking.begin(), asking.end(), from) != asking.end();
+            std::any_of(asking.begin(), asking.end(),
+                        [&](const Asker &asker) { return asker.from == from; });
         if (allowed.count(from) != 0) {
             result = net::Access::Allowed;
         } else if (denied.count(from) != 0) {
@@ -146,7 +156,7 @@ struct ReceiveJob {
         } else if (!waiting && !ask) {
             result = net::Access::Unknown;
         } else if (!waiting) {
-            asking.push_back(from);
+            asking.push_back({from, device});
         }
         LightLock_Unlock(&lock);
         return result;
@@ -185,27 +195,38 @@ struct ReceiveJob {
         return copy;
     }
 
-    // Runs on the listener's thread.
+    // Runs on the listener's thread. Only the newest word on a file still on
+    // its way is kept, so a long upload while the screen is elsewhere does
+    // not pile up reports.
     void progress(const net::Transfer &update)
     {
         LightLock_Lock(&lock);
-        transfer = update;
-        transferring = !update.finished;
-        if (update.finished && update.ok && update.upload) {
-            lastFile = update.name + " from " + update.from;
+        if (!reports.empty() && !reports.back().finished &&
+            reports.back().path == update.path &&
+            reports.back().upload == update.upload) {
+            reports.back() = update;
+        } else {
+            reports.push_back(update);
         }
         LightLock_Unlock(&lock);
     }
 
-    // The transfer in progress, if there is one.
-    bool current(net::Transfer &out, std::string &last)
+    // Runs on the listener's thread.
+    void pathChanged(const std::string &path)
     {
         LightLock_Lock(&lock);
-        const bool busy = transferring;
-        out = transfer;
-        last = lastFile;
+        changed.push_back(path);
         LightLock_Unlock(&lock);
-        return busy;
+    }
+
+    // Everything reported since the last call.
+    void takeReports(std::deque<net::Transfer> &newReports,
+                     std::deque<std::string> &newChanges)
+    {
+        LightLock_Lock(&lock);
+        newReports.swap(reports);
+        newChanges.swap(changed);
+        LightLock_Unlock(&lock);
     }
 };
 
@@ -232,6 +253,278 @@ void mdnsMain(void *argument)
     while (!job.stop.load()) {
         job.mdns.serve(250);
     }
+}
+
+using Row = net::ReceiveLog::Row;
+using RowKind = net::ReceiveLog::Kind;
+using RowState = net::ReceiveLog::State;
+
+// A sender in a sentence: "iPhone", or its address when it did not say.
+std::string whoIs(const std::string &device, const std::string &address)
+{
+    return device.empty() ? address : device;
+}
+
+// A sender as a fact: "Mac, 192.168.1.24".
+std::string senderOf(const std::string &device, const std::string &address)
+{
+    return device.empty() ? address : device + ", " + address;
+}
+
+// The time of day of a moment from osGetTime, which counts from 1900; the
+// console clock is already local time.
+std::string clockTime(int64_t milliseconds)
+{
+    const time_t seconds =
+        static_cast<time_t>(milliseconds / 1000 - 2208988800LL);
+    std::tm parts {};
+    gmtime_r(&seconds, &parts);
+    char text[8];
+    std::snprintf(text, sizeof(text), "%02d:%02d", parts.tm_hour, parts.tm_min);
+    return text;
+}
+
+int64_t clockNow()
+{
+    return static_cast<int64_t>(osGetTime());
+}
+
+screens::KindLook lookOf(const Row &row)
+{
+    return screens::lookOf(row.kind == RowKind::Folder
+                               ? filetype::Kind::Folder
+                               : filetype::fromName(row.name));
+}
+
+RowState rowState(HistoryStatus status)
+{
+    switch (status) {
+    case HistoryStatus::Saved:
+        return RowState::Received;
+    case HistoryStatus::Installed:
+        return RowState::Installed;
+    case HistoryStatus::Cancelled:
+        return RowState::Stopped;
+    case HistoryStatus::Failed:
+        break;
+    }
+    return RowState::Failed;
+}
+
+ui::ListItem rowItem(const Row &row)
+{
+    ui::ListItem item;
+    item.key = std::to_string(row.id);
+    item.label = row.name;
+    const screens::KindLook look = lookOf(row);
+    item.icon = look.icon;
+    item.iconColor = look.color;
+    const bool folder = row.kind == RowKind::Folder;
+    switch (row.state) {
+    case RowState::Active:
+        item.progress = net::progress(row);
+        item.detail = folder ? std::to_string(row.filesDone) + " of " +
+                                   std::to_string(row.files)
+                             : std::to_string(static_cast<int>(item.progress * 100)) +
+                                   "%";
+        break;
+    case RowState::Received:
+        item.detail = folder ? plural(row.filesDone, "file") : units::bytes(row.total);
+        break;
+    case RowState::Sent:
+        item.badge = "Sent";
+        item.badgeColor = ui::color::Tag;
+        break;
+    case RowState::Queued:
+        item.badge = "Queued";
+        item.badgeColor = ui::color::Badge;
+        break;
+    case RowState::Installed:
+        item.badge = "Installed";
+        item.badgeColor = ui::color::Good;
+        break;
+    case RowState::Failed:
+        item.badge = "Failed";
+        item.badgeColor = ui::color::Bad;
+        break;
+    case RowState::Stopped:
+        item.badge = "Stopped";
+        item.badgeColor = ui::color::Neutral;
+        break;
+    }
+    return item;
+}
+
+// What there is to know about a row, four facts at most.
+std::vector<ui::Fact> rowFacts(const Row &row)
+{
+    std::vector<ui::Fact> facts;
+    if (row.state == RowState::Failed && !row.message.empty()) {
+        facts.push_back({"Failed", row.message, ui::color::Bad});
+    }
+    if (row.kind == RowKind::Folder) {
+        facts.push_back({"Files", row.filesDone >= row.files
+                                      ? std::to_string(row.files)
+                                      : std::to_string(row.filesDone) + " of " +
+                                            std::to_string(row.files)});
+    } else if (row.total > 0 && row.done < row.total) {
+        facts.push_back({"Size", units::bytes(row.done) + " of " +
+                                     units::bytes(row.total)});
+    } else if (row.total > 0) {
+        facts.push_back({"Size", units::bytes(row.total)});
+    }
+    facts.push_back({row.upload ? "From" : "To", senderOf(row.device, row.from)});
+    if (!row.path.empty()) {
+        facts.push_back({row.upload ? "Saved to" : "Folder",
+                         row.path.substr(0, row.path.rfind('/') + 1)});
+    } else if (!row.url.empty()) {
+        facts.push_back({"Link", row.url});
+    }
+    facts.push_back({"Time", clockTime(row.changed)});
+    if (facts.size() > 4) {
+        facts.resize(4);
+    }
+    return facts;
+}
+
+// The largest scale up to most at which value fits width, so it is read
+// whole rather than scrolled.
+float fitScale(const std::string &value, float most, float width)
+{
+    const float natural = ui::textWidth(value, most);
+    return natural <= width ? most : most * width / natural;
+}
+
+// The top screen while nothing is on its way: the QR code for the page,
+// the address browsers and FBI's tools use beside it, and the console's
+// name under that.
+void drawConnect(const QrCode &code, const std::string &address,
+                 const std::string &named)
+{
+    ui::drawTopChrome("Receive", ui::Icon::Chip, ui::color::IconPink);
+    ui::drawPanel();
+    const float px = code.size() <= 25 ? 4 : 3;
+    const float side = code.size() * px;
+    const float qrX = ui::TopPanel.x + 12 + 2 * px;
+    code.draw(qrX, ui::TopPanel.y + (ui::TopPanel.h - side) / 2, px);
+    const float left = qrX + side + 2 * px + 12;
+    const float width = ui::TopPanel.x + ui::TopPanel.w - 12 - left;
+    const float middle = left + width / 2;
+    // One block, centred beside the code, each line whole.
+    const float heroScale = fitScale(address, ui::type::Hero, width);
+    const float nameScale = fitScale(named, ui::type::Body, width);
+    const float heroHeight = ui::lineHeight(heroScale);
+    const float nameHeight = named.empty() ? 0 : 4 + ui::lineHeight(nameScale);
+    float y = ui::TopPanel.y + (ui::TopPanel.h - heroHeight - nameHeight) / 2;
+    ui::drawMarquee(address, middle, y, heroScale, ui::color::Accent, width,
+                    C2D_AlignCenter);
+    y += heroHeight + 4;
+    if (!named.empty()) {
+        ui::drawMarquee(named, middle, y, nameScale, ui::color::Ink, width,
+                        C2D_AlignCenter);
+    }
+}
+
+// How far a transfer has got and how far it goes, in bytes: the whole
+// batch's when the page sent several files in one go, else the file's.
+struct Span {
+    uint64_t done;
+    uint64_t total;
+};
+
+Span spanOf(const net::Transfer &transfer)
+{
+    const uint64_t file = transfer.finished && transfer.ok ? transfer.total
+                                                           : transfer.done;
+    const remote::UploadBatch &batch = transfer.batch;
+    if (transfer.upload && batch.count > 1 && batch.bytes > 0) {
+        return {std::min(batch.bytes, batch.before + file), batch.bytes};
+    }
+    return {file, transfer.total};
+}
+
+// The top screen while a file is on its way, as the Downloading screen
+// shows one, with the address kept at the end of the dotted line. A batch
+// reads as one: its bytes, its place and the time left for all of it.
+void drawTransfer(const net::Transfer &transfer, const units::RateMeter &meter,
+                  const std::string &address)
+{
+    ui::drawTopChrome("Receive", ui::Icon::Chip, ui::color::IconPink, address);
+    ui::ProgressView view;
+    view.name = transfer.name;
+    const screens::KindLook look = screens::lookOf(filetype::fromName(transfer.name));
+    view.nameIcon = look.icon;
+    view.nameIconColor = look.color;
+    view.source = (transfer.upload ? "from " : "to ") +
+                  whoIs(transfer.device, transfer.from);
+    const Span span = spanOf(transfer);
+    view.fraction = span.total > 0
+                        ? static_cast<float>(static_cast<double>(span.done) /
+                                             static_cast<double>(span.total))
+                        : 1.0f;
+    view.amounts = units::bytes(span.done) + " of " + units::bytes(span.total);
+    if (meter.hasRate() && span.done < span.total) {
+        view.speed = units::rate(meter.bytesPerSecond());
+        const int64_t left = meter.secondsLeft(span.total - span.done);
+        if (left >= 0) {
+            view.left = units::timeLeft(static_cast<uint64_t>(left));
+        }
+    }
+    if (transfer.batch.count > 1) {
+        view.tag = std::to_string(transfer.batch.position) + " of " +
+                   std::to_string(transfer.batch.count);
+    }
+    ui::drawProgressPanel(view);
+}
+
+// A name in a list of what a sender handed over.
+struct Named {
+    std::string name;
+    std::string detail; // beside it: "github.com"
+};
+
+// The top screen for a question about what a sender handed over: the names,
+// then facts about where they come from and go.
+void drawHandedOver(const std::vector<Named> &names,
+                    const std::vector<ui::Fact> &facts)
+{
+    ui::drawTopChrome("Receive", ui::Icon::Chip, ui::color::IconPink);
+    ui::drawPanel();
+    // Four names, or three and how many more.
+    const size_t shown = names.size() > 4 ? 3 : names.size();
+    const float pitch = 22;
+    const float factsHeight = facts.size() * 26.0f - 6;
+    const float lines = static_cast<float>(shown + (names.size() > shown ? 1 : 0));
+    float y = ui::TopPanel.y +
+              (ui::TopPanel.h - lines * pitch - 12 - factsHeight) / 2;
+    const float left = ui::TopPanel.x + 18;
+    const float right = ui::TopPanel.x + ui::TopPanel.w - 18;
+    for (size_t index = 0; index < shown; ++index) {
+        const screens::KindLook look =
+            screens::lookOf(filetype::fromName(names[index].name));
+        ui::drawIcon(look.icon, left, y + 1, 17, look.color);
+        const float detailWidth =
+            names[index].detail.empty()
+                ? 0
+                : std::min(110.0f, ui::textWidth(names[index].detail, ui::type::Tiny)) + 10;
+        ui::drawMarquee(names[index].name, left + 24,
+                        y + (19 - ui::lineHeight(ui::type::Row)) / 2,
+                        ui::type::Row, ui::color::InkStrong,
+                        right - left - 24 - detailWidth);
+        if (detailWidth > 0) {
+            ui::drawText(ui::fitEnd(names[index].detail, ui::type::Tiny, 110),
+                         right, y + (19 - ui::lineHeight(ui::type::Tiny)) / 2,
+                         ui::type::Tiny, ui::color::InkSoft, C2D_AlignRight);
+        }
+        y += pitch;
+    }
+    if (names.size() > shown) {
+        ui::drawText("and " + std::to_string(names.size() - shown) + " more",
+                     left + 24, y + (19 - ui::lineHeight(ui::type::Small)) / 2,
+                     ui::type::Small, ui::color::InkSoft);
+        y += pitch;
+    }
+    ui::drawFacts(facts, {ui::TopPanel.x, y + 12, ui::TopPanel.w, factsHeight});
 }
 
 } // namespace
@@ -266,8 +559,17 @@ void App::addToQueue(const std::vector<std::string> &links,
     }
 }
 
-void App::runQueue(const std::vector<uint64_t> *ids)
+void App::runQueue(const std::vector<uint64_t> *ids,
+                   std::vector<QueueResult> *results)
 {
+    const auto report = [results](const std::string &url, HistoryStatus status,
+                                  const std::string &name,
+                                  const std::string &path, uint64_t bytes,
+                                  const std::string &message) {
+        if (results != nullptr) {
+            results->push_back({url, status, name, path, bytes, message});
+        }
+    };
     std::vector<uint64_t> order;
     for (const QueuedLink &item : queue_) {
         if (ids == nullptr ||
@@ -304,6 +606,7 @@ void App::runQueue(const std::vector<uint64_t> *ids)
         if (!fs::makeDirectories(item.folder)) {
             found->state = QueuedLink::State::Failed;
             found->message = "Could not create " + item.folder + ".";
+            report(item.url, HistoryStatus::Failed, "", "", 0, found->message);
             ++failed;
             continue;
         }
@@ -319,8 +622,10 @@ void App::runQueue(const std::vector<uint64_t> *ids)
         request.freeSpace = [](const std::string &) {
             return platform::sdFreeBytes();
         };
-        const std::string step = std::to_string(position + 1) + " of " +
-                                 std::to_string(order.size());
+        const std::string step = order.size() > 1
+                                     ? std::to_string(position + 1) + " of " +
+                                           std::to_string(order.size())
+                                     : "";
         const net::Result result = tasks::download(request, step);
         if (!ui::keepRunning()) {
             return;
@@ -332,6 +637,8 @@ void App::runQueue(const std::vector<uint64_t> *ids)
                 item.url, item.folder, HistoryStatus::Cancelled, result.message);
             stoppedEntry.name = result.filename;
             record(stoppedEntry);
+            report(item.url, HistoryStatus::Cancelled, result.filename, "",
+                   result.bytes, "");
             stopped = true;
             break;
         }
@@ -345,6 +652,8 @@ void App::runQueue(const std::vector<uint64_t> *ids)
             entry.bytes = result.bytes;
             entry.name = result.filename;
             record(entry);
+            report(item.url, HistoryStatus::Failed, result.filename, "",
+                   result.bytes, result.message);
             ++failed;
             continue;
         }
@@ -361,6 +670,9 @@ void App::runQueue(const std::vector<uint64_t> *ids)
         entry.path = placed.path;
         entry.name = result.filename;
         record(entry);
+        report(item.url, placed.ok ? HistoryStatus::Saved : HistoryStatus::Failed,
+               placed.ok ? basename(placed.path) : result.filename, placed.path,
+               result.bytes, placed.ok ? "" : placed.message);
         if (!placed.ok) {
             found->state = QueuedLink::State::Failed;
             found->message = placed.message;
@@ -396,7 +708,13 @@ void App::runQueue(const std::vector<uint64_t> *ids)
                        ciaAction == CiaAction::InstallAndDelete, item.url,
                        true)) {
             ++installed;
+            if (results != nullptr) {
+                results->back().status = HistoryStatus::Installed;
+            }
         }
+    }
+    if (results != nullptr) {
+        return; // the caller shows how each went
     }
 
     std::string summary = plural(saved, "file") + " downloaded";
@@ -538,18 +856,10 @@ void App::queueScreen()
 
 void App::receiveScreen()
 {
-    if (platform::wifiStatus() == platform::Wifi::Disconnected) {
-        ui::message("Not Connected",
-                    "Receiving needs the same Wi-Fi network as the phone or "
-                    "computer sending. Turn wireless communication on first.",
-                    ui::Tone::Warning);
-        return;
-    }
     const std::string address = localAddress();
-    if (address.empty()) {
-        ui::message("No Network Address",
-                    "The console has no address on the local network yet. "
-                    "Check the connection and try again.",
+    if (platform::wifiStatus() == platform::Wifi::Disconnected ||
+        address.empty()) {
+        ui::message("Not Connected", "Connect to Wi-Fi to receive.",
                     ui::Tone::Warning);
         return;
     }
@@ -562,9 +872,8 @@ void App::receiveScreen()
     }
     net::FileSharing sharing;
     sharing.root = "sdmc:";
-    sharing.access = [&job](const std::string &from, bool ask) {
-        return job.access(from, ask);
-    };
+    sharing.access = [&job](const std::string &from, const std::string &device,
+                            bool ask) { return job.access(from, device, ask); };
     sharing.freeSpace = []() { return platform::sdFreeBytes(); };
     sharing.totalSpace = []() { return platform::sdTotalBytes(); };
     sharing.status = [&job]() { return job.snapshot(); };
@@ -572,6 +881,7 @@ void App::receiveScreen()
     sharing.progress = [&job](const net::Transfer &transfer) {
         job.progress(transfer);
     };
+    sharing.changed = [&job](const std::string &path) { job.pathChanged(path); };
     sharing.working = [&job](bool starting) {
         if (starting) {
             ++job.requests;
@@ -619,220 +929,78 @@ void App::receiveScreen()
             ? threadCreate(mdnsMain, &job, 16 * 1024, workerPriority, -2, false)
             : nullptr;
 
+    // Browsers and FBI's tools reach the console at the same address; the
+    // page needs its port too when it could not have port 80.
     const std::string port =
         job.receiver.webPort() == 80
-            ? std::string("/")
-            : ":" + std::to_string(job.receiver.webPort()) + "/";
-    const std::string page = "http://" + address + port;
-    std::string namedPage;
-    const QrCode code(page);
-    std::string last;
-    bool backPressed = false;
+            ? std::string()
+            : ":" + std::to_string(job.receiver.webPort());
+    const std::string shownAddress = address + port;
+    const QrCode code("http://" + shownAddress + "/");
+    // Only log.txt says whether FBI's tools could reach the console.
+    const bool fbiListening = job.receiver.fbiPort() != 0;
+    // Shown from the start: claiming the name takes a second or so, and only
+    // another console on Receive moves it on to 3ds-2.
+    std::string named = mdnsThread != nullptr
+                            ? "http://" + std::string(NetworkName) + ".local" + port
+                            : "";
+    bool nameSettled = false;
+    std::string hostname; // for log.txt, once settled
+
     std::optional<awake::Hold> keptAwake;
     uint32_t requestsSeen = 0;
+    // The newest report, for the top screen, which shows a finished file a
+    // moment longer so a batch does not flicker between its files.
+    net::Transfer current;
+    int64_t heard = 0;
     units::RateMeter meter;
-    std::string meterName;
-    const ui::Rect back = ui::tabRect(ui::Tab::Left);
+    constexpr int64_t LingerMs = 1500;
+    const int64_t opened = clockNow();
+    // For log.txt, once Receive closes.
+    uint32_t filesIn = 0;
+    uint32_t filesOut = 0;
+    uint32_t linksIn = 0;
+    uint32_t installed = 0;
+    uint32_t failed = 0;
+    uint64_t bytesIn = 0;
 
-    // Installs what the page sent, telling it how each went.
-    const auto installReceived = [this](ReceiveJob &state,
-                                        const std::vector<std::string> &paths,
-                                        bool deleteAfter) {
-        size_t installed = 0;
-        std::vector<std::string> failed;
-        std::vector<std::string> already;
-        for (size_t index = 0; index < paths.size() && ui::keepRunning();
-             ++index) {
-            const std::string name = basename(paths[index]);
-            state.setState("installing",
-                           "Installing " + name +
-                               (paths.size() > 1
-                                    ? " (" + std::to_string(index + 1) +
-                                          " of " +
-                                          std::to_string(paths.size()) + ")"
-                                    : "") +
-                               ".");
-            cia::Info info;
-            std::string error;
-            bool kept = false;
-            if (!cia::readInfo(paths[index], info, error) ||
-                !installCia(paths[index], info, deleteAfter, "", true, &kept)) {
-                failed.push_back(name);
-            } else if (kept) {
-                already.push_back(name);
-            } else {
-                ++installed;
+    const auto takeReports = [&]() {
+        std::deque<net::Transfer> reports;
+        std::deque<std::string> changes;
+        job.takeReports(reports, changes);
+        const int64_t now = clockNow();
+        for (const net::Transfer &report : reports) {
+            // A batch is measured as one, so its speed and time left carry
+            // on from file to file.
+            const bool sameBatch = !report.batch.id.empty() &&
+                                   report.batch.id == current.batch.id;
+            if (!sameBatch && (report.path != current.path ||
+                               report.upload != current.upload)) {
+                meter.reset();
             }
-        }
-        const auto listed = [](const std::vector<std::string> &names) {
-            std::string list;
-            for (const std::string &name : names) {
-                list += (list.empty() ? "" : ", ") + name;
+            current = report;
+            heard = now;
+            meter.sample(static_cast<uint64_t>(now), spanOf(report).done);
+            if (report.finished && report.ok && report.upload) {
+                ++filesIn;
+                bytesIn += report.total;
+            } else if (report.finished && report.ok) {
+                ++filesOut;
+            } else if (report.finished) {
+                ++failed;
             }
-            return list;
-        };
-        std::string summary;
-        if (installed > 0) {
-            summary = paths.size() == 1
-                          ? "Installed " + basename(paths[0]) + "."
-                      : installed == paths.size()
-                          ? "Installed all " + plural(paths.size(), "CIA") + "."
-                          : "Installed " + plural(installed, "CIA") + ".";
+            receiveLog_.transfer(report, now);
         }
-        if (!already.empty()) {
-            summary += std::string(summary.empty() ? "" : " ") +
-                       (paths.size() == 1
-                            ? already.front() + " was already installed."
-                            : "Already installed: " + listed(already) + ".");
+        for (const std::string &path : changes) {
+            sdChanged(path);
         }
-        if (!failed.empty()) {
-            summary += std::string(summary.empty() ? "" : " ") +
-                       "Not installed: " + listed(failed) + ".";
-        }
-        state.finish(summary, failed.empty());
-        // A single CIA that was already there has had its own message.
-        if (installed > 0 || !failed.empty() || paths.size() > 1) {
-            ui::message(failed.empty() ? "Installed" : "Some were not installed",
-                        summary,
-                        failed.empty() ? ui::Tone::Success
-                                       : ui::Tone::Warning);
-        }
+        receiveLog_.settle(now);
     };
 
-    ui::enterScreen("receive");
-    while (ui::keepRunning() && !quit_) {
-        if (namedPage.empty() && job.named.load()) {
-            namedPage = "http://" + job.mdns.hostname() + port;
-        }
-
-        std::string asker;
-        if (job.takeAsking(asker)) {
-            ui::Dialog dialog;
-            dialog.header = "Receive";
-            dialog.title = "Let " + asker +
-                           " add, change and delete files on the SD card?";
-            dialog.tone = ui::Tone::Warning;
-            dialog.buttons = {"Allow", "Don't Allow"};
-            dialog.cancelButton = 1;
-            job.setState("asking", "Asking whether " + asker +
-                                       " may use the SD card.");
-            job.answer(asker, ui::choose(dialog) == 0);
-            job.setState("ready");
-            continue;
-        }
-
-        net::Received received;
-        if (job.take(received)) {
-            logging::info("receive.got", {{"links", received.links.size()},
-                                          {"cias", received.install.size()},
-                                          {"fbi", received.replySocket >= 0}});
-            if (!received.install.empty()) {
-                ui::Dialog dialog;
-                dialog.header = "Receive";
-                dialog.title = "Install " +
-                               plural(received.install.size(), "CIA") +
-                               " sent from " + received.from + "?";
-                dialog.tone = ui::Tone::Info;
-                std::string names;
-                for (size_t index = 0;
-                     index < received.install.size() && index < 4; ++index) {
-                    names += (index > 0 ? ", " : "") +
-                             basename(received.install[index]);
-                }
-                if (received.install.size() > 4) {
-                    names += " and " +
-                             std::to_string(received.install.size() - 4) +
-                             " more";
-                }
-                dialog.body.push_back({names, ui::color::Text, 0.5f, 3});
-                dialog.buttons = {"Install", "Install and Delete", "Not Now"};
-                dialog.cancelButton = 2;
-                job.setState("choosing",
-                             "Waiting for you to choose Install on the 3DS.");
-                const int choice = ui::choose(dialog);
-                if (choice == 0 || choice == 1) {
-                    installReceived(job, received.install, choice == 1);
-                } else {
-                    job.finish("Not installed: Not Now was chosen on the 3DS.",
-                               false);
-                }
-                continue;
-            }
-            const bool fromFbiTool = received.replySocket >= 0;
-            ui::Dialog dialog;
-            dialog.header = "Receive";
-            dialog.title = "Received " + plural(received.links.size(), "link") +
-                           " from " + received.from + ".";
-            dialog.tone = ui::Tone::Info;
-            std::string names;
-            for (size_t index = 0; index < received.links.size() && index < 4;
-                 ++index) {
-                names += (index > 0 ? ", " : "") + nameOf(received.links[index]);
-            }
-            if (received.links.size() > 4) {
-                names += " and " + std::to_string(received.links.size() - 4) +
-                         " more";
-            }
-            dialog.body.push_back({names, ui::color::Text, 0.5f, 3});
-            dialog.body.push_back({"They go to " + settings_.destination + ".",
-                                   ui::color::Muted, 0.44f, 2});
-            if (fromFbiTool) {
-                // The sender stops serving its files once told the links are
-                // done, so these cannot wait in the queue.
-                dialog.buttons = {"Download", "Cancel"};
-                dialog.cancelButton = 1;
-            } else {
-                dialog.buttons = {"Download", "Add to Queue", "Cancel"};
-                dialog.cancelButton = 2;
-            }
-            job.setState("choosing",
-                         "Waiting for you to choose Download on the 3DS.", true);
-            const int choice = ui::choose(dialog);
-            const std::string count = plural(received.links.size(), "link");
-            if (choice == 1 && !fromFbiTool) {
-                job.finish("Added " + count + " to the Queue on the 3DS.", true,
-                           true);
-            } else if (choice != 0) {
-                job.finish("Not downloaded: Cancel was chosen on the 3DS.",
-                           false, true);
-            }
-            if (choice == 0 || (!fromFbiTool && choice == 1)) {
-                const uint64_t first = nextQueueId_;
-                addToQueue(received.links, settings_.destination, choice == 1);
-                if (choice == 0) {
-                    std::vector<uint64_t> ids;
-                    for (const QueuedLink &item : queue_) {
-                        if (item.id >= first ||
-                            std::find(received.links.begin(),
-                                      received.links.end(),
-                                      item.url) != received.links.end()) {
-                            ids.push_back(item.id);
-                        }
-                    }
-                    job.setState("downloading", "Downloading " + count + ".",
-                                 true);
-                    runQueue(&ids);
-                    job.finish("Done with " + count +
-                                   " on the 3DS. History has how each went.",
-                               true, true);
-                }
-                last = plural(received.links.size(), "link") + " from " +
-                       received.from;
-            }
-            net::finishReceived(received);
-            ui::enterScreen("receive");
-            continue;
-        }
-
-        net::Transfer transfer;
-        std::string lastFile;
-        const bool busy = job.current(transfer, lastFile);
-        if (!lastFile.empty()) {
-            last = lastFile;
-        }
-        // Someone using the page holds the console awake, and the linger
-        // after each request covers the gap before the next, so closing the
-        // lid never cuts a batch off between files (issue #13).
+    // Someone using the page holds the console awake, and the linger after
+    // each request covers the gap before the next, so closing the lid never
+    // cuts a batch off between files (issue #13).
+    const auto holdAwake = [&]() {
         const uint32_t started = job.started.load();
         const bool inUse = job.requests.load() > 0 || started != requestsSeen;
         requestsSeen = started;
@@ -843,111 +1011,254 @@ void App::receiveScreen()
                 keptAwake.emplace();
             }
         }
-        if (busy && transfer.name != meterName) {
-            meter.reset();
-            meterName = transfer.name;
+    };
+
+    const auto askAbout = [&](const ReceiveJob::Asker &asker) {
+        const std::string who = whoIs(asker.device, asker.from);
+        ui::Dialog dialog;
+        dialog.header = "Receive";
+        dialog.title = "Let " + who + " manage files on the SD card?";
+        dialog.tone = ui::Tone::Warning;
+        dialog.buttons = {"Allow", "Don't Allow"};
+        dialog.cancelButton = 1;
+        dialog.drawTop = [&]() {
+            ui::drawTopChrome("Receive", ui::Icon::Chip, ui::color::IconPink);
+            ui::drawPanel();
+            std::vector<ui::Fact> facts;
+            if (!asker.device.empty()) {
+                facts.push_back({"Device", asker.device});
+            }
+            facts.push_back({"Address", asker.from});
+            facts.push_back({"Until", "You leave Receive"});
+            ui::drawFacts(facts);
+        };
+        job.setState("asking", "Asking whether " + who + " may use the SD card.");
+        job.answer(asker.from, ui::choose(dialog) == 0);
+        job.setState("ready");
+    };
+
+    // Installs CIAs on the SD card that the page sent, telling it how that
+    // went; the list on the console shows each.
+    const auto installSent = [&](const net::Received &received, bool deleteAfter) {
+        const size_t count = received.install.size();
+        size_t done = 0;
+        for (size_t index = 0; index < count && ui::keepRunning(); ++index) {
+            const std::string &path = received.install[index];
+            job.setState("installing",
+                         "Installing " + basename(path) +
+                             (count > 1 ? " (" + std::to_string(index + 1) +
+                                              " of " + std::to_string(count) + ")"
+                                        : "") +
+                             ".");
+            cia::Info info;
+            std::string why;
+            const bool ok = cia::readInfo(path, info, why) &&
+                            installCia(path, info, deleteAfter, "", true);
+            receiveLog_.installEnded(path, received, ok,
+                                     why.empty() ? "Not installed." : why,
+                                     clockNow());
+            done += ok ? 1 : 0;
         }
-        if (busy) {
-            meter.sample(osGetTime(), transfer.done);
+        installed += static_cast<uint32_t>(done);
+        job.finish(done == count
+                       ? (count == 1 ? "Installed " + basename(received.install[0]) + "."
+                                     : "Installed all " + plural(count, "CIA") + ".")
+                       : "Installed " + std::to_string(done) + " of " +
+                             std::to_string(count) + ".",
+                   done == count);
+    };
+
+    // What a sender handed over: CIAs on the SD card to install, or links.
+    const auto handle = [&](net::Received &received) {
+        logging::info("receive.got", {{"links", received.links.size()},
+                                      {"cias", received.install.size()},
+                                      {"fbi", received.replySocket >= 0}});
+        const std::string who = whoIs(received.device, received.from);
+        const std::vector<ui::Fact> from = {
+            {"From", senderOf(received.device, received.from)}};
+        if (!received.install.empty()) {
+            std::vector<Named> names;
+            for (const std::string &path : received.install) {
+                names.push_back({basename(path), ""});
+            }
+            ui::Dialog dialog;
+            dialog.header = "Receive";
+            dialog.title = "Install " + plural(received.install.size(), "CIA") +
+                           " from " + who + "?";
+            dialog.tone = ui::Tone::Info;
+            dialog.buttons = {"Install", "Install and Delete", "Not Now"};
+            dialog.cancelButton = 2;
+            dialog.drawTop = [&]() { drawHandedOver(names, from); };
+            job.setState("choosing", "Waiting for you to choose on the 3DS.");
+            const int choice = ui::choose(dialog);
+            if (choice == 0 || choice == 1) {
+                installSent(received, choice == 1);
+            } else {
+                job.finish("Not installed: Not Now was chosen on the 3DS.", false);
+            }
+            return;
         }
 
-        const ui::Input input = ui::readInput();
-        if (input.down & KEY_B) {
+        // FBI's tools send CIAs to install, as FBI did, without keeping a
+        // copy; they wait for the reply, so nothing they send can be queued.
+        const bool fromFbiTool = received.replySocket >= 0;
+        const bool allCias = std::all_of(
+            received.links.begin(), received.links.end(), [](const std::string &link) {
+                return filetype::fromName(nameOf(link)) == filetype::Kind::Cia;
+            });
+        enum class Choice { Install, Download, Queue, Cancel };
+        const std::vector<Choice> choices =
+            fromFbiTool && allCias && installer::available()
+                ? std::vector<Choice>{Choice::Install, Choice::Download, Choice::Cancel}
+            : fromFbiTool ? std::vector<Choice>{Choice::Download, Choice::Cancel}
+                          : std::vector<Choice>{Choice::Download, Choice::Queue,
+                                                Choice::Cancel};
+        const bool offerInstall = choices.front() == Choice::Install;
+        const size_t count = received.links.size();
+        std::vector<Named> names;
+        for (const std::string &link : received.links) {
+            names.push_back({nameOf(link), url::host(link)});
+        }
+        std::vector<ui::Fact> facts = from;
+        if (!offerInstall) {
+            facts.push_back({"Save to", settings_.destination});
+        }
+        ui::Dialog dialog;
+        dialog.header = "Receive";
+        dialog.title = offerInstall
+                           ? "Install " + plural(count, "CIA") + " from " + who + "?"
+                           : "Download " + plural(count, "file") + " from " + who + "?";
+        dialog.tone = ui::Tone::Info;
+        for (const Choice choice : choices) {
+            dialog.buttons.push_back(choice == Choice::Install    ? "Install"
+                                     : choice == Choice::Download ? "Download"
+                                     : choice == Choice::Queue    ? "Add to Queue"
+                                                                  : "Cancel");
+        }
+        dialog.cancelButton = static_cast<int>(choices.size()) - 1;
+        dialog.drawTop = [&]() { drawHandedOver(names, facts); };
+        job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
+        const int picked = ui::choose(dialog);
+        const Choice choice = picked >= 0 && picked < static_cast<int>(choices.size())
+                                  ? choices[picked]
+                                  : Choice::Cancel;
+        const std::string links = plural(count, "link");
+
+        if (choice == Choice::Install) {
+            receiveLog_.addLinks(received, RowState::Active, clockNow());
+            job.setState("installing", "Installing " + links + ".", true);
+            size_t done = 0;
+            for (const std::string &link : received.links) {
+                std::string why;
+                const HistoryStatus status = installDirectly(link, true, &why);
+                receiveLog_.linkEnded(link, rowState(status), "", "", 0, why,
+                                      clockNow());
+                done += status == HistoryStatus::Installed ? 1 : 0;
+                if (status == HistoryStatus::Cancelled || !ui::keepRunning()) {
+                    break;
+                }
+            }
+            receiveLog_.settleLinks(RowState::Stopped, clockNow());
+            linksIn += static_cast<uint32_t>(count);
+            installed += static_cast<uint32_t>(done);
+            job.finish(done == count
+                           ? "Installed " + plural(count, "CIA") + " on the 3DS."
+                           : "Installed " + std::to_string(done) + " of " +
+                                 plural(count, "CIA") + " on the 3DS.",
+                       done == count, true);
+        } else if (choice == Choice::Download) {
+            const uint64_t first = nextQueueId_;
+            addToQueue(received.links, settings_.destination, false);
+            std::vector<uint64_t> ids;
+            for (const QueuedLink &item : queue_) {
+                if (item.id >= first ||
+                    std::find(received.links.begin(), received.links.end(),
+                              item.url) != received.links.end()) {
+                    ids.push_back(item.id);
+                }
+            }
+            receiveLog_.addLinks(received, RowState::Active, clockNow());
+            job.setState("downloading", "Downloading " + links + ".", true);
+            std::vector<QueueResult> results;
+            runQueue(&ids, &results);
+            for (const QueueResult &result : results) {
+                receiveLog_.linkEnded(result.url, rowState(result.status),
+                                      result.name, result.path, result.bytes,
+                                      result.message, clockNow());
+                installed += result.status == HistoryStatus::Installed ? 1 : 0;
+            }
+            // What a stop left behind is still in the Queue.
+            receiveLog_.settleLinks(RowState::Queued, clockNow());
+            linksIn += static_cast<uint32_t>(count);
+            job.finish("Done with " + links + " on the 3DS.", true, true);
+        } else if (choice == Choice::Queue) {
+            addToQueue(received.links, settings_.destination, false);
+            receiveLog_.addLinks(received, RowState::Queued, clockNow());
+            linksIn += static_cast<uint32_t>(count);
+            job.finish("Added " + links + " to the Queue on the 3DS.", true, true);
+        } else {
+            job.finish("Not downloaded: Cancel was chosen on the 3DS.", false, true);
+        }
+        net::finishReceived(received);
+    };
+
+    // The list takes what has happened each frame, and runs the questions
+    // and the work senders ask for over itself.
+    ui::ListSpec spec;
+    spec.title = "Receive";
+    spec.emptyText = "Nothing received yet";
+    uint32_t shown = 0;
+    const auto fillRows = [&]() {
+        spec.items.clear();
+        for (const Row &row : receiveLog_.rows()) {
+            spec.items.push_back(rowItem(row));
+        }
+        shown = receiveLog_.generation();
+    };
+    spec.update = [&]() {
+        if (!nameSettled && job.named.load()) {
+            hostname = job.mdns.hostname();
+            named = "http://" + hostname + port;
+            nameSettled = true;
+        }
+        holdAwake();
+        takeReports();
+        ReceiveJob::Asker asker;
+        net::Received received;
+        if (job.takeAsking(asker)) {
+            askAbout(asker);
+            ui::lockTouch();
+        } else if (job.take(received)) {
+            handle(received);
+            ui::lockTouch();
+        }
+        if (receiveLog_.generation() == shown) {
+            return false;
+        }
+        fillRows();
+        return true;
+    };
+    spec.drawTop = [&](int) {
+        const bool moving = !current.path.empty() &&
+                            (!current.finished ||
+                             (current.ok && clockNow() - heard < LingerMs));
+        if (moving) {
+            drawTransfer(current, meter, shownAddress);
+        } else {
+            drawConnect(code, shownAddress, named);
+        }
+    };
+
+    int cursor = 0;
+    while (ui::keepRunning() && !quit_) {
+        fillRows();
+        const ui::ListResult result = ui::runList(spec, cursor);
+        if (result.key != KEY_A || result.index < 0 ||
+            result.index >= static_cast<int>(receiveLog_.rows().size())) {
             break;
         }
-        if (input.down & KEY_TOUCH) {
-            backPressed = back.contains(input.touch);
-        }
-        if ((input.up & KEY_TOUCH) && backPressed) {
-            backPressed = false;
-            if (back.contains(input.touch)) {
-                break;
-            }
-        }
-
-        ui::beginFrame();
-        ui::drawTopChrome("Receive", ui::Icon::Chip, ui::color::IconPink);
-        ui::drawPanel();
-        const float px = code.size() <= 25 ? 4 : 3;
-        const float qrSide = code.size() * px;
-        const float qrX = ui::TopPanel.x + 12 + 2 * px;
-        const float qrY = ui::TopPanel.y + (ui::TopPanel.h - qrSide) / 2;
-        code.draw(qrX, qrY, px);
-        const float left = qrX + qrSide + 2 * px + 12;
-        const float width = ui::TopPanel.x + ui::TopPanel.w - 12 - left;
-        // The page's addresses are large on the touch screen, so the column
-        // beside the code holds the one FBI's tools use, centred in it.
-        const std::string tools = "Boop and servefiles.py";
-        // Small enough that "192.168.185.97:5000" fits the column.
-        constexpr float AddressScale = 0.48f;
-        const float middle = left + width / 2;
-        const float toolsY =
-            ui::TopPanel.y +
-            (ui::TopPanel.h - 20 - 8 - ui::lineHeight(AddressScale)) / 2;
-        ui::drawTag(middle - (ui::textWidth(tools, 0.4f) + 16) / 2, toolsY,
-                    tools);
-        const bool fbi = job.receiver.fbiPort() != 0;
-        ui::drawMarquee(fbi ? address + ":" +
-                                  std::to_string(job.receiver.fbiPort())
-                            : "Port " + std::to_string(remote::FbiPort) +
-                                  " is busy",
-                        middle, toolsY + 28, AddressScale,
-                        fbi ? ui::color::Ink : ui::color::InkSoft, width,
-                        C2D_AlignCenter);
-
-        ui::beginBottom();
-        // Centred above Back.
-        const ui::Rect panel = {13, 36, 294, 136};
-        ui::drawPanel(panel);
-        if (busy) {
-            ui::drawText(transfer.upload ? "Receiving" : "Sending", 160,
-                         panel.y + 14, ui::type::Small, ui::color::InkSoft,
-                         C2D_AlignCenter);
-            ui::drawMarquee(transfer.name, 160, panel.y + 34, ui::type::Body,
-                            ui::color::Ink, 270, C2D_AlignCenter);
-            const float fraction =
-                transfer.total > 0
-                    ? static_cast<float>(static_cast<double>(transfer.done) /
-                                         static_cast<double>(transfer.total))
-                    : 1.0f;
-            ui::drawProgressBar({33, panel.y + 64, 254, 14}, fraction);
-            ui::drawText(units::bytes(transfer.done) + " of " +
-                             units::bytes(transfer.total),
-                         160, panel.y + 88, ui::type::Small, ui::color::Ink,
-                         C2D_AlignCenter);
-            ui::drawText(meter.hasRate()
-                             ? units::rate(meter.bytesPerSecond()) + ", " +
-                                   (transfer.upload ? "from " : "to ") +
-                                   transfer.from
-                             : (transfer.upload ? "From " : "To ") +
-                                   transfer.from,
-                         160, panel.y + 110, ui::type::Tiny, ui::color::InkSoft,
-                         C2D_AlignCenter);
-        } else {
-            // Centred with or without the last line. The 3ds.local line
-            // keeps its place while mdns settles, so nothing jumps.
-            const float height =
-                last.empty() ? 80 + ui::lineHeight(ui::type::Small)
-                             : 102 + ui::lineHeight(ui::type::Tiny);
-            const float y = panel.y + (panel.h - height) / 2;
-            ui::drawSpinner(160, y + 12, 12);
-            ui::drawText("Waiting at", 160, y + 30, ui::type::Body,
-                         ui::color::Ink, C2D_AlignCenter);
-            ui::drawMarquee(page, 160, y + 56, ui::type::Body,
-                            ui::color::Accent, 280, C2D_AlignCenter);
-            if (!namedPage.empty()) {
-                ui::drawMarquee("or " + namedPage, 160, y + 80,
-                                ui::type::Small, ui::color::InkSoft, 280,
-                                C2D_AlignCenter);
-            }
-            if (!last.empty()) {
-                ui::drawMarquee("Last: " + last, 160, y + 102, ui::type::Tiny,
-                                ui::color::InkSoft, 280, C2D_AlignCenter);
-            }
-        }
-        ui::drawTab(ui::Tab::Left, "Back", "B",
-                    backPressed && (input.held & KEY_TOUCH));
-        ui::endFrame();
+        // A copy: the list goes on changing while the row is open.
+        receivedOptions(receiveLog_.rows()[result.index], shownAddress);
     }
 
     job.stop.store(true);
@@ -957,6 +1268,9 @@ void App::receiveScreen()
         threadJoin(mdnsThread, U64_MAX);
         threadFree(mdnsThread);
     }
+    // The last reports, such as an upload given up as the listener stopped.
+    takeReports();
+    receiveLog_.stopAll(clockNow());
     // Senders still waiting are told the links are done, so they exit.
     net::Received pending;
     while (job.take(pending)) {
@@ -964,15 +1278,89 @@ void App::receiveScreen()
     }
     job.receiver.close();
     job.mdns.close();
+    logging::info("receive.done", {{"files", filesIn},
+                                   {"bytes", bytesIn},
+                                   {"sent", filesOut},
+                                   {"links", linksIn},
+                                   {"installed", installed},
+                                   {"failed", failed},
+                                   {"fbi", fbiListening},
+                                   {"name", hostname},
+                                   {"ms", clockNow() - opened}});
 }
 
-void App::installDirectly(const std::string &address)
+void App::receivedOptions(net::ReceiveLog::Row row, const std::string &address)
 {
+    const bool there = !row.path.empty() && fileops::exists(row.path);
+    const bool installable = there && row.kind != RowKind::Folder &&
+                             row.state != RowState::Installed &&
+                             filetype::fromName(row.path) == filetype::Kind::Cia &&
+                             installer::available();
+    enum class Option { Install, InstallAndDelete, Show };
+    std::vector<Option> options;
+    std::vector<ui::MenuItem> items;
+    if (installable) {
+        options = {Option::Install, Option::InstallAndDelete};
+        items = {{"Install"}, {"Install and Delete File"}};
+    }
+    if (there) {
+        options.push_back(Option::Show);
+        items.push_back({"Show in Files"});
+    }
+    const std::vector<ui::Fact> facts = rowFacts(row);
+    const int choice = ui::menu(items, [&](int) {
+        ui::drawTopChrome("Receive", ui::Icon::Chip, ui::color::IconPink, address);
+        ui::drawPanel();
+        // The name beside its icon, then the fact rows (20 px, 26 apart),
+        // centred in the panel as one block.
+        constexpr float Header = 30 + 14;
+        const float rows = facts.size() * 26.0f - 6;
+        const float top = ui::TopPanel.y + (ui::TopPanel.h - Header - rows) / 2;
+        const float left = ui::TopPanel.x + 18;
+        const screens::KindLook look = lookOf(row);
+        ui::drawIcon(look.icon, left, top, 30, look.color);
+        ui::drawMarquee(row.name, left + 40, top + (30 - ui::lineHeight(0.62f)) / 2,
+                        0.62f, ui::color::InkStrong, 300);
+        ui::drawFacts(facts, {ui::TopPanel.x, top + Header, ui::TopPanel.w, rows});
+    });
+    if (choice < 0) {
+        return;
+    }
+    if (options[choice] == Option::Show) {
+        filesScreen(row.path);
+        return;
+    }
+    cia::Info info;
+    std::string error;
+    if (!cia::readInfo(row.path, info, error)) {
+        ui::message("Cannot install", error, ui::Tone::Error, row.name);
+        return;
+    }
+    net::Received sender;
+    sender.from = row.from;
+    sender.device = row.device;
+    if (installCia(row.path, info, options[choice] == Option::InstallAndDelete,
+                   "")) {
+        receiveLog_.installEnded(row.path, sender, true, "", clockNow());
+    }
+}
+
+HistoryStatus App::installDirectly(const std::string &address, bool quiet,
+                                   std::string *message)
+{
+    const auto failed = [message](const std::string &why) {
+        if (message != nullptr) {
+            *message = why;
+        }
+        return HistoryStatus::Failed;
+    };
     const std::string folder = storage::DataFolder;
     if (!fs::makeDirectories(folder)) {
-        ui::message("Not Installed", "Could not create " + folder + ".",
-                    ui::Tone::Error);
-        return;
+        if (!quiet) {
+            ui::message("Not Installed", "Could not create " + folder + ".",
+                        ui::Tone::Error);
+        }
+        return failed("Could not create " + folder + ".");
     }
     installer::StreamInstall sink;
     net::Request request;
@@ -1010,7 +1398,7 @@ void App::installDirectly(const std::string &address)
         }
     }
     if (!ui::keepRunning()) {
-        return;
+        return HistoryStatus::Cancelled;
     }
 
     const cia::Info &info = sink.info();
@@ -1025,14 +1413,19 @@ void App::installDirectly(const std::string &address)
     };
     if (installed.outcome == installer::Outcome::Cancelled) {
         recordResult(HistoryStatus::Cancelled, "Direct install stopped");
-        ui::message("Install Stopped", "Nothing was changed.");
-        return;
+        if (!quiet) {
+            ui::message("Install Stopped", "Nothing was changed.");
+        }
+        return HistoryStatus::Cancelled;
     }
     if (installed.outcome != installer::Outcome::Installed) {
         recordResult(HistoryStatus::Failed,
                      "Direct install failed: " + installed.message);
-        ui::message("Install Failed", installed.message, ui::Tone::Error, name);
-        return;
+        if (!quiet) {
+            ui::message("Install Failed", installed.message, ui::Tone::Error,
+                        name);
+        }
+        return failed(installed.message);
     }
     recordResult(HistoryStatus::Installed, "Installed directly, nothing saved");
 
@@ -1044,6 +1437,9 @@ void App::installDirectly(const std::string &address)
                                                &busy.cancel);
                     },
                     true);
+    }
+    if (quiet) {
+        return HistoryStatus::Installed;
     }
     const uint64_t launchId = cia::baseTitle(info.titleId);
     const cia::Kind kind = cia::kind(launchId);
@@ -1073,4 +1469,5 @@ void App::installDirectly(const std::string &address)
             ui::message("Could Not Launch", error, ui::Tone::Error);
         }
     }
+    return HistoryStatus::Installed;
 }

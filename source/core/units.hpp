@@ -17,6 +17,10 @@ std::string grouped(uint64_t count);
 std::string rate(double bytesPerSecond);
 // "42s", "3m 05s", "1h 02m"
 std::string duration(uint64_t seconds);
+// An estimate of the time left, to show while something is on its way:
+// "8 s left", "45 s left", "3 min left", "1 h 20 min left". Rounded, so it
+// holds still from one frame to the next.
+std::string timeLeft(uint64_t seconds);
 // "2026-10-12 14:03". The 3DS clock has no time zone, so the value is shown
 // exactly as stored.
 std::string dateTime(int64_t unixSeconds);

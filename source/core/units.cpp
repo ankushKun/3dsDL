@@ -1,5 +1,6 @@
 #include "units.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <ctime>
 
@@ -120,6 +121,36 @@ void RateMeter::sample(uint64_t milliseconds, uint64_t totalBytes)
     hasRate_ = true;
     lastTime_ = milliseconds;
     lastBytes_ = totalBytes;
+}
+
+std::string timeLeft(uint64_t seconds)
+{
+    char buffer[40];
+    // Under ten seconds it counts down; then in fives, then in minutes.
+    const uint64_t fives = (seconds + 4) / 5 * 5;
+    if (seconds < 10) {
+        std::snprintf(buffer, sizeof(buffer), "%u s left",
+                      static_cast<unsigned>(std::max<uint64_t>(1, seconds)));
+        return buffer;
+    }
+    if (fives < 60) {
+        std::snprintf(buffer, sizeof(buffer), "%u s left",
+                      static_cast<unsigned>(fives));
+        return buffer;
+    }
+    const uint64_t minutes = std::max<uint64_t>(1, (seconds + 30) / 60);
+    if (minutes < 60) {
+        std::snprintf(buffer, sizeof(buffer), "%u min left",
+                      static_cast<unsigned>(minutes));
+    } else if (minutes % 60 == 0) {
+        std::snprintf(buffer, sizeof(buffer), "%u h left",
+                      static_cast<unsigned>(minutes / 60));
+    } else {
+        std::snprintf(buffer, sizeof(buffer), "%u h %u min left",
+                      static_cast<unsigned>(minutes / 60),
+                      static_cast<unsigned>(minutes % 60));
+    }
+    return buffer;
 }
 
 int64_t RateMeter::secondsLeft(uint64_t remainingBytes) const

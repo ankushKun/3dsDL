@@ -917,14 +917,20 @@ void drawStrip(const Rect &box, const std::vector<std::string> &labels,
                             : static_cast<int>(index) == dangerLabel
                                 ? color::Bad
                                 : color::InkDialog;
-        // One line per button, shrinking; a label still too long at the
-        // smallest size goes on two lines rather than losing its end.
+        // One line per button, shrinking, then a little narrower; a label
+        // still too long goes on two lines rather than losing its end.
         float scale = type::Tab;
-        while (scale > 0.42f && textWidth(labels[index], scale) > area.w - 12) {
+        const float room = area.w - 12;
+        while (scale > 0.42f && textWidth(labels[index], scale) > room) {
             scale -= 0.02f;
         }
-        if (textWidth(labels[index], scale) <= area.w - 12) {
+        const float width = textWidth(labels[index], scale);
+        if (width <= room) {
             drawCentered(labels[index], area, scale, textColor);
+        } else if (width * MaxSqueeze <= room) {
+            drawSqueezed(labels[index], area.x + area.w / 2,
+                         area.y + (area.h - lineHeight(scale)) / 2 + 1, scale,
+                         room / width, textColor, C2D_AlignCenter);
         } else {
             const std::vector<std::string> lines =
                 wrap(labels[index], scale, area.w - 10, 2);
@@ -3385,6 +3391,16 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
                 textX += 23;
             }
             float right = row.x + row.w - 8;
+            if (item.progress >= 0) {
+                // Under the name and whatever is beside it.
+                const Rect track = {textX, row.y + row.h - 4.5f, right - textX, 2.5f};
+                fillRound(track, 1.25f, color::rgb(0xE2DBBB));
+                const float fill = track.w * std::max(0.0f, std::min(1.0f, item.progress));
+                if (fill > 0) {
+                    fillRound({track.x, track.y, fill, track.h}, 1.25f,
+                              {{0, color::rgb(0xFFCC22)}, {1, color::rgb(0xFF9900)}});
+                }
+            }
             if (!item.badge.empty()) {
                 right -= drawBadge(right, row.y + 4.5f, item.badge,
                                    item.badgeColor) + 6;
@@ -3455,10 +3471,8 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
 
 const Rect ProgressCancelButton = {70, 148, 180, 36};
 
-void drawProgress(const ProgressView &view)
+void drawProgressPanel(const ProgressView &view)
 {
-    beginFrame();
-    drawTopChrome(view.title, view.icon, view.iconColor);
     drawPanel();
     const float left = TopPanel.x + 18;
     float nameX = left;
@@ -3466,7 +3480,7 @@ void drawProgress(const ProgressView &view)
         drawTitleIcon(view.titleIcon, left, TopPanel.y + 12);
         nameX += 60;
     } else {
-        drawIcon(Icon::Package, left, TopPanel.y + 16, 30, color::Accent);
+        drawIcon(view.nameIcon, left, TopPanel.y + 16, 30, view.nameIconColor);
         nameX += 40;
     }
     const float nameWidth = TopPanel.x + TopPanel.w - 18 - nameX;
@@ -3488,14 +3502,32 @@ void drawProgress(const ProgressView &view)
         drawText(percent, TopPanel.x + TopPanel.w - 18, TopPanel.y + 98,
                  type::Body, color::InkStrong, C2D_AlignRight);
     }
-    // The speed gives way to the tag beside it.
+    // The speed and its tag on the left, and the time left across from
+    // them, under the percentage; the speed gives way to the others.
+    const float right = TopPanel.x + TopPanel.w - 18;
+    const float leftWidth =
+        view.left.empty() ? 0 : std::min(textWidth(view.left, type::Small), 160.0f);
+    if (leftWidth > 0) {
+        drawFitted(view.left, right, TopPanel.y + 126, type::Small,
+                   color::InkStrong, leftWidth, C2D_AlignRight);
+    }
     const float tagWidth = view.tag.empty() ? 0 : textWidth(view.tag, 0.4f) + 16;
-    drawMarquee(view.speed, left, TopPanel.y + 126, type::Small, color::Ink,
-                TopPanel.w - 36 - tagWidth - 8);
-    if (!view.tag.empty()) {
-        drawTag(TopPanel.x + TopPanel.w - 18 - tagWidth, TopPanel.y + 124,
+    const float room = right - left - (leftWidth > 0 ? leftWidth + 12 : 0) -
+                       (tagWidth > 0 ? tagWidth + 8 : 0);
+    const float speedWidth =
+        view.speed.empty() ? 0 : std::min(textWidth(view.speed, type::Small), room);
+    drawMarquee(view.speed, left, TopPanel.y + 126, type::Small, color::Ink, room);
+    if (tagWidth > 0) {
+        drawTag(left + (speedWidth > 0 ? speedWidth + 8 : 0), TopPanel.y + 124,
                 view.tag);
     }
+}
+
+void drawProgress(const ProgressView &view)
+{
+    beginFrame();
+    drawTopChrome(view.title, view.icon, view.iconColor);
+    drawProgressPanel(view);
 
     beginBottom();
     // Three lines of the message at most, in a panel that fills the screen
@@ -3587,7 +3619,15 @@ void drawBusy(const BusyView &view)
     drawCentered("Please wait...",
                  {box.x + (box.w - width) / 2 + 42, rowY - 20, 200, 40},
                  type::Body, color::InkDialog, true);
-    if (view.progress) {
+    if (view.progress && !view.left.empty()) {
+        // The count under the bar's start, the time left under its end.
+        drawProgressBar({box.x + 30, box.y + 54, box.w - 60, 12}, view.fraction);
+        const float half = (box.w - 60) / 2 - 4;
+        drawFitted(view.amount, box.x + 30, box.y + 72, type::Tiny,
+                   color::InkSoft, half, 0);
+        drawFitted(view.left, box.x + box.w - 30, box.y + 72, type::Tiny,
+                   color::InkDialog, half, C2D_AlignRight);
+    } else if (view.progress) {
         drawProgressBar({box.x + 30, box.y + 54, box.w - 60, 12}, view.fraction);
         drawFitted(view.amount, box.x + box.w / 2, box.y + 72, type::Tiny,
                    color::InkSoft, box.w - 60, C2D_AlignCenter);

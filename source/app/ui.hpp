@@ -402,6 +402,9 @@ struct ListItem {
     u32 iconColor = color::IconGrey;
     std::string badge; // replaces detail with a coloured badge
     u32 badgeColor = color::Badge;
+    // From 0 to 1: a thin bar along the foot of the row, for something on
+    // its way. Below 0 draws none.
+    float progress = -1;
     // Names the row, so the highlight follows it when update reorders the
     // rows; "" for lists that never change while open.
     std::string key;
@@ -497,12 +500,15 @@ struct ProgressView {
     Icon icon = Icon::Download;
     u32 iconColor = color::IconGreen;
     std::string name;   // the file or title
+    Icon nameIcon = Icon::Package; // beside name when there is no titleIcon
+    u32 nameIconColor = color::Accent;
     std::string source; // under the name: host or version
     std::vector<uint16_t> titleIcon; // 48x48 when a title is known
     float fraction = -1.0f;
     std::string amounts; // "3.10 MiB of 4.42 MiB"
-    std::string speed;   // "1.24 MiB/s, about 1 second left"
-    std::string tag;     // "4 connections"
+    std::string speed;   // "1.24 MiB/s"
+    std::string tag;     // "4 connections", beside the speed
+    std::string left;    // "9 s left" (units::timeLeft), at the line's end
     std::string note;    // green, e.g. "Continuing from 12.0 MiB"
     std::string message; // on the bottom panel: where it goes, or a warning
     bool cancellable = true; // a Cancel button under the panel
@@ -511,6 +517,8 @@ struct ProgressView {
 
 extern const Rect ProgressCancelButton;
 void drawProgress(const ProgressView &view);
+// Only the top screen's panel of drawProgress, under a title row drawn first.
+void drawProgressPanel(const ProgressView &view);
 
 // A "Please wait..." dialog over the current screens.
 void drawBusy(const std::string &header, const std::string &title);
@@ -521,6 +529,7 @@ struct BusyView {
     bool progress = false; // a bar, filled to fraction, with amount under it
     float fraction = 0;
     std::string amount; // "3 of 12"
+    std::string left;   // "9 s left" (units::timeLeft), across from amount
     bool cancellable = false; // a Cancel button along the bottom of the box
     bool stopping = false;    // it was pressed and the job is finishing
     bool pressed = false;     // it is held down
