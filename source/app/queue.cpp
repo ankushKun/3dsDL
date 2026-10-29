@@ -31,6 +31,8 @@
 #include <cstdio>
 #include <ctime>
 #include <deque>
+#include <initializer_list>
+#include <memory>
 #include <optional>
 #include <set>
 
@@ -253,6 +255,41 @@ void mdnsMain(void *argument)
     while (!job.stop.load()) {
         job.mdns.serve(250);
     }
+}
+
+// Waits for Receive's threads to end once told to stop. They do within a
+// quarter of a second; one stuck in the network service must not freeze
+// the screen and the HOME button with it, so a longer wait goes on behind
+// a busy screen. False when 3dsDL closes first: the threads are then left
+// running.
+bool waitForThreads(std::initializer_list<Thread> threads)
+{
+    // 0 only once a thread has ended: a timeout is a status code that
+    // R_FAILED does not count as failing.
+    const auto ended = [&](u64 timeoutNs) {
+        for (const Thread thread : threads) {
+            if (thread != nullptr && threadJoin(thread, timeoutNs) != 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+    if (ended(500000000ULL)) {
+        return true;
+    }
+    const uint64_t started = osGetTime();
+    bool done = false;
+    while (!(done = ended(0)) && ui::keepRunning()) {
+        ui::readInput();
+        ui::BusyView view;
+        view.header = "Receive";
+        view.title = "Stopping...";
+        ui::drawBusy(view);
+        gspWaitForVBlank();
+    }
+    logging::warn("receive.stopping",
+                  {{"ms", osGetTime() - started}, {"stopped", done}});
+    return done;
 }
 
 using Row = net::ReceiveLog::Row;
@@ -864,7 +901,9 @@ void App::receiveScreen()
         return;
     }
 
-    ReceiveJob job;
+    // On the heap, so a thread that never stops can keep it.
+    std::unique_ptr<ReceiveJob> owned(new ReceiveJob());
+    ReceiveJob &job = *owned;
     std::string error;
     if (!job.receiver.open(remote::FbiPort, WebPort, FallbackWebPort, error)) {
         ui::message("Cannot Receive", error, ui::Tone::Error);
@@ -1262,10 +1301,12 @@ void App::receiveScreen()
     }
 
     job.stop.store(true);
-    threadJoin(thread, U64_MAX);
+    if (!waitForThreads({thread, mdnsThread})) {
+        owned.release(); // 3dsDL is closing; the threads still use it
+        return;
+    }
     threadFree(thread);
     if (mdnsThread != nullptr) {
-        threadJoin(mdnsThread, U64_MAX);
         threadFree(mdnsThread);
     }
     // The last reports, such as an upload given up as the listener stopped.
