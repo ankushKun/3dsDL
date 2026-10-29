@@ -66,6 +66,7 @@ TEST("filetype: classifies by extension")
 {
     using filetype::Kind;
     CHECK(filetype::fromName("Game.CIA") == Kind::Cia);
+    CHECK(filetype::fromName("Game.zcia") == Kind::Cia);
     CHECK(filetype::fromName("app.3dsx") == Kind::Homebrew);
     CHECK(filetype::fromName("rom.3ds") == Kind::CartridgeImage);
     CHECK(filetype::fromName("rom.nds") == Kind::Nds);

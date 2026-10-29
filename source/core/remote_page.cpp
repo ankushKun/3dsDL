@@ -406,13 +406,14 @@ function duration(s) {
   if (s < 3600) return 'about ' + Math.round(s / 60) + ' min';
   return 'about ' + (s / 3600).toFixed(1) + ' h';
 }
-const KINDS = {cia: 'cia', '3dsx': '3dsx', zip: 'zip', '7z': 'zip', rar: 'zip', png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', bmp: 'img', webp: 'img',
+const KINDS = {cia: 'cia', zcia: 'cia', '3dsx': '3dsx', zip: 'zip', '7z': 'zip', rar: 'zip', png: 'img', jpg: 'img', jpeg: 'img', gif: 'img', bmp: 'img', webp: 'img',
   txt: 'txt', ini: 'txt', cfg: 'txt', json: 'txt', xml: 'txt', log: 'txt', md: 'txt', yml: 'txt', yaml: 'txt', lua: 'txt', nds: 'rom', '3ds': 'rom', cci: 'rom',
   firm: 'rom', tik: 'rom', smdh: 'rom', mp3: 'media', ogg: 'media', wav: 'media', mp4: 'media', bcstm: 'media'};
 const TEXT = new Set(['txt', 'ini', 'cfg', 'json', 'xml', 'log', 'md', 'yml', 'yaml', 'lua', 'csv', 'conf', 'sh', 'py', 'js', 'html', 'htm', 'css', 'opt']);
 const PICTURES = new Set(['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp']);
 const MEDIA = new Set(['mp3', 'ogg', 'wav', 'mp4', 'pdf']);
-const TITLED = new Set(['cia', '3dsx', 'smdh', '3ds', 'cci', 'nds']);
+const TITLED = new Set(['cia', 'zcia', '3dsx', 'smdh', '3ds', 'cci', 'nds']);
+const CIAS = new Set(['cia', 'zcia']);
 const fileUrl = (path, download) => '/api/file?' + (download ? 'download=1&' : '') + 'path=' + enc(path);
 // Places where a slip can stop the console from starting or lose games.
 function risk(paths) {
@@ -858,7 +859,7 @@ function selbar() {
   const n = F.sel.size, all = $('#all'), visible = shown().length;
   $('#selbar').hidden = !n;
   $('#selcount').textContent = n + ' selected';
-  $('#selinstall').hidden = ![...F.sel].some(p => ext(p) === 'cia');
+  $('#selinstall').hidden = ![...F.sel].some(p => CIAS.has(ext(p)));
   all.checked = n > 0 && n >= visible;
   all.indeterminate = n > 0 && n < visible;
 }
@@ -918,7 +919,7 @@ async function details(li) {
     if (PICTURES.has(x)) add('eye', 'View', () => view(path));
     else if (MEDIA.has(x)) add('eye', 'Open', () => window.open(fileUrl(path), '_blank'));
     if (TEXT.has(x) && e.size <= 1048576) add('edit', 'Edit', () => edit(path));
-    if (x === 'cia') add('install', 'Install on 3DS', () => install([path]));
+    if (CIAS.has(x)) add('install', 'Install on 3DS', () => install([path]));
   }
   add('rename', 'Rename', () => rename(path));
   add('move', 'Move To...', () => move([path]));
@@ -1010,7 +1011,7 @@ async function remove(paths) {
   setTimeout(() => load(F.cwd, true), 280);
 }
 async function install(paths) {
-  const cias = paths.filter(p => ext(p) === 'cia');
+  const cias = paths.filter(p => CIAS.has(ext(p)));
   if (!cias.length) return;
   try {
     await api('POST', '/api/install', {paths: cias.join('\n')});
@@ -1303,7 +1304,7 @@ async function send(f) {
         fill.style.width = '100%';
         const s = (performance.now() - t0) / 1e3;
         f.li.classList.add('ok');
-        if (ext(f.path) === 'cia') U.arrived.push(f.path);
+        if (CIAS.has(ext(f.path))) U.arrived.push(f.path);
         const top = f.path.startsWith(F.cwd === '/' ? '/' : F.cwd + '/') ? f.path.slice(F.cwd === '/' ? 1 : F.cwd.length + 1).split('/')[0] : '';
         if (top && !F.entries.some(e => e.name === top)) {
           // Shown now, ahead of the next upload, rather than once all are

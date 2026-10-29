@@ -147,6 +147,10 @@ installed, and a game older than the installed version.
 35. A CIA bigger than the free space is refused before anything is written.
 36. LAUNCH after installing starts the title, from both the `.3dsx` and the
     CIA build. Installing 3dsDL's own CIA over itself from the CIA build works.
+36a. A `.zcia` made by Azahar (`azahar -c game.cia`, or its Compress menu)
+    shows "ZCIA" with its icon and name in Files and installs from there,
+    from the Receive page and after downloading it, and the game starts.
+    Note how long a game of 1 GiB or more takes next to its `.cia`.
 
 ### Files
 

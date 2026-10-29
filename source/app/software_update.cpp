@@ -421,7 +421,7 @@ void App::installUpdate(const update::Release &release)
                         ui::Tone::Error);
             return;
         }
-        const int64_t needed = installer::requiredSpace(placed.path, info.titleId);
+        const int64_t needed = installer::requiredSpace(placed.path, info);
         const int64_t free = platform::sdFreeBytes();
         if (needed > 0 && free >= 0 && needed > free) {
             fs::removeFile(placed.path);

@@ -41,7 +41,7 @@ Kind fromName(const std::string &name)
     const std::string extension = text::lower(naming::extension(name));
     const std::string bare =
         extension.empty() ? "" : extension.substr(extension.front() == '.');
-    if (bare == "cia") {
+    if (bare == "cia" || bare == "zcia") {
         return Kind::Cia;
     }
     if (bare == "tik") {

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace installer {
@@ -113,6 +114,33 @@ Result failure(::Result code, const std::string &what)
     result.versionRefused = isVersionRefusal(code);
     result.message = what + " " + describe(code);
     return result;
+}
+
+// Opens the CIA inside a .zcia. False, leaving reader alone, for a plain
+// CIA; false with error set when the .zcia cannot be read.
+bool openCompressed(Handle file, u64 size, z3ds::Reader &reader,
+                    std::string &error)
+{
+    uint8_t header[z3ds::HeaderSize];
+    u32 read = 0;
+    z3ds::Header parsed;
+    if (size < sizeof(header) ||
+        R_FAILED(FSFILE_Read(file, &read, 0, header, sizeof(header))) ||
+        read != sizeof(header) ||
+        !z3ds::parseHeader(header, sizeof(header), parsed)) {
+        return false;
+    }
+    if (!z3ds::holdsCia(parsed)) {
+        error = "This compressed file does not hold a CIA.";
+        return false;
+    }
+    const auto source = [file](uint64_t offset, void *buffer, size_t count) {
+        u32 got = 0;
+        return R_SUCCEEDED(FSFILE_Read(file, &got, offset, buffer,
+                                       static_cast<u32>(count))) &&
+               got == count;
+    };
+    return reader.open(source, size, error);
 }
 
 // FBI's FSUSER_AddSeed, which libctru does not wrap.
@@ -290,6 +318,19 @@ Result installCia(const std::string &path, uint64_t titleId,
     if (R_FAILED(code)) {
         return failure(code, "Could not read the CIA file.");
     }
+    // A .zcia is decompressed on its way to AM.
+    z3ds::Reader compressed;
+    std::string error;
+    const bool isCompressed =
+        openCompressed(file.get(), size, compressed, error);
+    if (!error.empty()) {
+        Result result;
+        result.message = error;
+        return result;
+    }
+    if (isCompressed) {
+        size = compressed.size();
+    }
 
     std::unique_ptr<uint8_t, decltype(&std::free)> buffer(
         static_cast<uint8_t *>(std::malloc(ChunkSize)), &std::free);
@@ -321,14 +362,25 @@ Result installCia(const std::string &path, uint64_t titleId,
         const u32 wanted = static_cast<u32>(
             std::min<u64>(ChunkSize, size - offset));
         u32 read = 0;
-        code = FSFILE_Read(file.get(), &read, offset, buffer.get(), wanted);
-        if (R_SUCCEEDED(code) && read != wanted) {
-            code = MAKERESULT(RL_PERMANENT, RS_INVALIDSTATE, RM_APPLICATION,
-                              RD_NO_DATA);
-        }
-        if (R_FAILED(code)) {
-            AM_CancelCIAInstall(target);
-            return failure(code, "Reading the CIA file failed.");
+        if (isCompressed) {
+            if (!compressed.read(offset, buffer.get(), wanted, error)) {
+                AM_CancelCIAInstall(target);
+                Result result;
+                result.message = error;
+                result.compressed = true;
+                return result;
+            }
+            read = wanted;
+        } else {
+            code = FSFILE_Read(file.get(), &read, offset, buffer.get(), wanted);
+            if (R_SUCCEEDED(code) && read != wanted) {
+                code = MAKERESULT(RL_PERMANENT, RS_INVALIDSTATE,
+                                  RM_APPLICATION, RD_NO_DATA);
+            }
+            if (R_FAILED(code)) {
+                AM_CancelCIAInstall(target);
+                return failure(code, "Reading the CIA file failed.");
+            }
         }
         u32 written = 0;
         code = FSFILE_Write(target, &written, offset, buffer.get(), read, 0);
@@ -349,6 +401,7 @@ Result installCia(const std::string &path, uint64_t titleId,
     result.outcome = Outcome::Installed;
     result.bytes = size;
     result.seconds = static_cast<double>(osGetTime() - startTime) / 1000.0;
+    result.compressed = isCompressed;
     return result;
 }
 
@@ -395,8 +448,62 @@ bool StreamInstall::write(uint64_t offset, const void *data, size_t size)
         result_.message = unavailableReason();
         return false;
     }
+    const uint8_t *bytes = static_cast<const uint8_t *>(data);
+    if (sniffed_) {
+        return pass(offset, bytes, size);
+    }
+    // The first four bytes tell a .zcia from a CIA.
+    constexpr size_t MagicSize = 4;
+    if (offset != sniff_.size()) {
+        result_.message = "The download arrived out of order.";
+        return false;
+    }
+    const size_t used = std::min(size, MagicSize - sniff_.size());
+    sniff_.insert(sniff_.end(), bytes, bytes + used);
+    if (sniff_.size() < MagicSize) {
+        return true;
+    }
+    sniffed_ = true;
+    compressed_ = std::memcmp(sniff_.data(), "Z3DS", MagicSize) == 0;
+    const std::vector<uint8_t> first = std::move(sniff_);
+    sniff_.clear();
+    return pass(0, first.data(), first.size()) &&
+           (used == size || pass(first.size(), bytes + used, size - used));
+}
+
+// Hands on what arrived, decompressing a .zcia's bytes first.
+bool StreamInstall::pass(uint64_t offset, const uint8_t *data, size_t size)
+{
+    if (!compressed_) {
+        return take(offset, data, size);
+    }
+    if (offset != fed_) {
+        result_.message = "The download arrived out of order.";
+        cancel();
+        return false;
+    }
+    fed_ += size;
     std::string error;
-    if (!stream_.feed(offset, static_cast<const uint8_t *>(data), size, error)) {
+    const auto out = [this](const uint8_t *bytes, size_t count) {
+        const bool ok = take(unpacked_, bytes, count);
+        unpacked_ += count;
+        return ok;
+    };
+    if (unpack_.feed(data, size, out, error)) {
+        return true;
+    }
+    if (!error.empty()) { // otherwise take() has said why
+        result_.message = error;
+        cancel();
+    }
+    return false;
+}
+
+// Gives the CIA's bytes to AM, once its title ID is known.
+bool StreamInstall::take(uint64_t offset, const uint8_t *data, size_t size)
+{
+    std::string error;
+    if (!stream_.feed(offset, data, size, error)) {
         result_.message = error;
         cancel();
         return false;
@@ -428,6 +535,12 @@ Result StreamInstall::finish()
         }
         return result_;
     }
+    if (compressed_ && !unpack_.done()) {
+        cancel();
+        result_ = Result();
+        result_.message = "The download ended before the whole CIA arrived.";
+        return result_;
+    }
     const ::Result code = AM_FinishCiaInstall(target_);
     started_ = false;
     target_ = 0;
@@ -439,6 +552,7 @@ Result StreamInstall::finish()
     result_.outcome = Outcome::Installed;
     result_.bytes = written_;
     result_.seconds = static_cast<double>(osGetTime() - startTime_) / 1000.0;
+    result_.compressed = compressed_;
     return result_;
 }
 
@@ -479,15 +593,18 @@ bool removeTitle(uint64_t titleId, std::string &error)
     return true;
 }
 
-int64_t requiredSpace(const std::string &path, uint64_t titleId)
+int64_t requiredSpace(const std::string &path, const cia::Info &info)
 {
+    if (info.compressed) {
+        return static_cast<int64_t>(info.contentSize);
+    }
     if (!started) {
         return -1;
     }
     FileHandle file;
     u64 space = 0;
     if (R_FAILED(file.open(path)) ||
-        R_FAILED(AM_GetCiaRequiredSpace(&space, destination(titleId),
+        R_FAILED(AM_GetCiaRequiredSpace(&space, destination(info.titleId),
                                         file.get()))) {
         return -1;
     }

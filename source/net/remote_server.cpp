@@ -475,8 +475,9 @@ bool readTitle(const std::string &local, Title &title, std::string &error)
 {
     const filetype::Kind kind = filetype::fromName(local);
     if (kind == filetype::Kind::Cia) {
+        // Quick, as a .zcia's end could keep the server busy for seconds.
         cia::Info info;
-        if (!cia::readInfo(local, info, error)) {
+        if (!cia::readInfo(local, info, error, true)) {
             return false;
         }
         title.name = !info.smdh.englishShortName.empty()

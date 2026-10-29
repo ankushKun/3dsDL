@@ -200,7 +200,7 @@ Details loadDetails(const std::string &path, Kind kind,
         break;
     case Kind::Cia:
         details.ciaReadable =
-            cia::readInfo(path, details.cia, details.error);
+            cia::readInfo(path, details.cia, details.error, true);
         if (details.ciaReadable) {
             details.installed = installer::installedVersion(
                 details.cia.titleId, details.installedVersion);
@@ -394,13 +394,14 @@ void drawEntryTop(const std::string &path, const fs::Entry &entry,
         drawEntryPanel(info.smdh.icon, kind, ciaName(info),
                        info.smdh.publisher.empty() ? entry.name
                                                    : info.smdh.publisher,
-                       {{"Type", std::string("CIA, ") +
+                       {{"Type", std::string(info.compressed ? "ZCIA, "
+                                                             : "CIA, ") +
                                      cia::kindName(cia::kind(info.titleId))},
                         {"Version",
                          versionRow(info.titleId, info.version,
                                     details.installed,
                                     details.installedVersion)},
-                        {"Size", units::bytes(info.fileSize)}});
+                        {"Size", sizeText(entry.size)}});
         return;
     }
     if (kind == Kind::Image) {
@@ -1472,7 +1473,10 @@ void App::ciaOptions(const std::string &path)
 {
     cia::Info info;
     std::string error;
-    if (!cia::readInfo(path, info, error)) {
+    if (!readCia(path, info, error)) {
+        if (error.empty()) {
+            return;
+        }
         ui::Dialog dialog;
         dialog.header = "CIA Installer";
         dialog.title = "This CIA cannot be installed.";
@@ -2010,9 +2014,11 @@ void App::installCias(const std::vector<std::string> &paths, bool deleteAfter)
     if (paths.size() == 1) {
         cia::Info info;
         std::string error;
-        if (!cia::readInfo(paths.front(), info, error)) {
-            ui::message("Cannot install", error, ui::Tone::Error,
-                        basename(paths.front()));
+        if (!readCia(paths.front(), info, error)) {
+            if (!error.empty()) {
+                ui::message("Cannot install", error, ui::Tone::Error,
+                            basename(paths.front()));
+            }
             return;
         }
         installCia(paths.front(), info, deleteAfter, "");
@@ -2029,7 +2035,7 @@ void App::installCias(const std::vector<std::string> &paths, bool deleteAfter)
         cia::Info info;
         std::string error;
         bool already = false;
-        if (cia::readInfo(path, info, error) &&
+        if (readCia(path, info, error) &&
             installCia(path, info, deleteAfter, "", true, &already)) {
             ++(already ? kept : installed);
         } else {

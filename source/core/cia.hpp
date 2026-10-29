@@ -2,6 +2,7 @@
 
 #include "smdh.hpp"
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -42,22 +43,33 @@ enum class Seed { NotNeeded, Needed, Unknown };
 struct Info {
     uint64_t titleId = 0;
     uint16_t version = 0;
-    uint64_t fileSize = 0;
+    uint64_t fileSize = 0; // the CIA's, inside a .zcia too
     bool hasSmdh = false;
     smdh::Info smdh;
     // Games from 2015 on can be encrypted with a seed the console has to
     // fetch. Unknown when the content is encrypted and its header unreadable.
     Seed seed = Seed::Unknown;
+    // The contents' total, from the CIA's header.
+    uint64_t contentSize = 0;
+    // Read from a CIA compressed as Azahar's .zcia.
+    bool compressed = false;
+    // A quick read left out the name and icon at the CIA's end.
+    bool smdhLeft = false;
 };
 
 // Reads size bytes at offset into buffer. False when that is not possible.
 using Reader = std::function<bool(uint64_t offset, void *buffer, size_t size)>;
 
 // fileSize may be 0 when unknown. Sets error and returns false when the data
-// is not a CIA.
+// is not a CIA. Without withSmdh, the name and icon at its end are left out.
 bool readInfo(const Reader &read, uint64_t fileSize, Info &info,
-              std::string &error);
-bool readInfo(const std::string &path, Info &info, std::string &error);
+              std::string &error, bool withSmdh = true);
+// A .cia, or a CIA compressed as Azahar's .zcia. Azahar's own .zcia files
+// carry the name and icon up front; any other has them only at its end,
+// which can take seconds to decompress, so a quick read leaves them out.
+// Setting *stop ends the read early.
+bool readInfo(const std::string &path, Info &info, std::string &error,
+              bool quick = false, const std::atomic<bool> *stop = nullptr);
 // Checks only the header, for listing files quickly.
 bool isCiaFile(const std::string &path);
 

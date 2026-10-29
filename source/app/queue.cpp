@@ -391,7 +391,7 @@ void App::runQueue(const std::vector<uint64_t> *ids)
         }
         cia::Info info;
         std::string error;
-        if (cia::readInfo(placed.path, info, error) &&
+        if (readCia(placed.path, info, error) &&
             installCia(placed.path, info,
                        ciaAction == CiaAction::InstallAndDelete, item.url,
                        true)) {
@@ -655,7 +655,7 @@ void App::receiveScreen()
             cia::Info info;
             std::string error;
             bool kept = false;
-            if (!cia::readInfo(paths[index], info, error) ||
+            if (!readCia(paths[index], info, error) ||
                 !installCia(paths[index], info, deleteAfter, "", true, &kept)) {
                 failed.push_back(name);
             } else if (kept) {

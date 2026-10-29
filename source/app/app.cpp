@@ -450,12 +450,12 @@ App::Start App::startDownload(const std::string &address, std::string folder)
             dialog.body.push_back({result.detail, ui::color::Muted, 0.4f, 2});
         }
         // A CIA too big for the SD card can still go straight into the
-        // install service, as FBI did.
+        // install service, as FBI did, and a .zcia decompressed on the way.
         const std::string fileName = result.filename.empty()
                                          ? naming::chooseFilename("", link)
                                          : result.filename;
         if (result.noSpace && installer::available() &&
-            text::endsWithNoCase(fileName, ".cia")) {
+            filetype::fromName(fileName) == filetype::Kind::Cia) {
             dialog.buttons = {"Install Directly", "Close"};
             dialog.cancelButton = 1;
             if (ui::choose(dialog) == 0) {
@@ -885,14 +885,37 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
 
 // --- Installing --------------------------------------------------------------
 
+bool App::readCia(const std::string &path, cia::Info &info, std::string &error)
+{
+    const bool quick = cia::readInfo(path, info, error, true);
+    if (!quick || !info.smdhLeft) {
+        return quick;
+    }
+    bool ok = false;
+    if (!tasks::busy("CIA Installer", "Reading " + basename(path) + "...",
+                     [&](tasks::Busy &busy) {
+                         ok = cia::readInfo(path, info, error, false,
+                                            &busy.cancel);
+                     },
+                     true)) {
+        error.clear();
+        return false;
+    }
+    return ok;
+}
+
 void App::offerInstall(const std::string &path, const std::string &address,
                        const std::string &summary)
 {
     cia::Info info;
     std::string error;
-    if (!cia::readInfo(path, info, error)) {
-        ui::message("Download complete", summary, ui::Tone::Success,
-                    "It looks like a CIA but cannot be installed: " + error);
+    if (!readCia(path, info, error)) {
+        if (error.empty()) {
+            ui::message("Download complete", summary, ui::Tone::Success);
+        } else {
+            ui::message("Download complete", summary, ui::Tone::Success,
+                        "It looks like a CIA but cannot be installed: " + error);
+        }
         return;
     }
     if (!installer::available()) {
@@ -1078,7 +1101,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
     }
 
     if (installer::destination(info.titleId) == MEDIATYPE_SD) {
-        const int64_t needed = installer::requiredSpace(path, info.titleId);
+        const int64_t needed = installer::requiredSpace(path, info);
         const int64_t free = platform::sdFreeBytes();
         if (needed > 0 && free >= 0 && needed > free) {
             ui::message("Not enough space",
@@ -1593,7 +1616,7 @@ void App::historyScreen()
         std::string error;
         const bool installable = !entry.path.empty() &&
                                  cia::isCiaFile(entry.path) &&
-                                 cia::readInfo(entry.path, info, error);
+                                 cia::readInfo(entry.path, info, error, true);
         enum class Action { Install, Download, Remove };
         std::vector<ui::MenuItem> items;
         std::vector<Action> actions;
@@ -1614,7 +1637,12 @@ void App::historyScreen()
         }
         switch (actions[choice]) {
         case Action::Install:
-            installCia(entry.path, info, false, entry.url);
+            if (readCia(entry.path, info, error)) {
+                installCia(entry.path, info, false, entry.url);
+            } else if (!error.empty()) {
+                ui::message("Cannot install", error, ui::Tone::Error,
+                            basename(entry.path));
+            }
             break;
         case Action::Download:
             startDownload(entry.url, fs::directoryExists(entry.folder)

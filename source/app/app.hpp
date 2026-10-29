@@ -59,6 +59,10 @@ private:
                              "Download complete. Extract the archive?",
                          const archives::Listing *known = nullptr);
 
+    // cia::readInfo, with a busy screen while a .zcia without Azahar's copy
+    // of its name and icon decompresses its end for them. False with error
+    // empty when stopped there.
+    bool readCia(const std::string &path, cia::Info &info, std::string &error);
     // Asks what to do with a CIA that just finished downloading.
     void offerInstall(const std::string &path, const std::string &address,
                       const std::string &summary);

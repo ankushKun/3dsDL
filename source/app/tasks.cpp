@@ -667,6 +667,7 @@ installer::Result install(const std::string &path, uint64_t titleId,
                 {"ms", static_cast<uint64_t>(result.seconds * 1000)},
                 {"code", eventlog::hex(static_cast<uint32_t>(result.code))},
                 {"olderOrSame", result.versionRefused},
+                {"compressed", result.compressed},
                 {"message", result.message}});
     return job.result;
 }

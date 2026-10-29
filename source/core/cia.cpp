@@ -1,9 +1,12 @@
 #include "cia.hpp"
 
+#include "z3ds.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <utility>
 #include <vector>
 
 namespace cia {
@@ -126,7 +129,7 @@ bool parseLayout(const uint8_t *header, size_t size, Layout &layout)
 }
 
 bool readInfo(const Reader &read, uint64_t fileSize, Info &info,
-              std::string &error)
+              std::string &error, bool withSmdh)
 {
     info = Info();
     info.fileSize = fileSize;
@@ -143,6 +146,7 @@ bool readInfo(const Reader &read, uint64_t fileSize, Info &info,
                 "downloading.";
         return false;
     }
+    info.contentSize = layout.contentSize;
 
     uint8_t type[4];
     if (!read(layout.tmdOffset, type, sizeof(type))) {
@@ -182,7 +186,10 @@ bool readInfo(const Reader &read, uint64_t fileSize, Info &info,
 
     if (layout.metaSize >= SmdhInMeta + smdh::Size) {
         std::vector<uint8_t> block(smdh::Size);
-        if (read(layout.metaOffset + SmdhInMeta, block.data(), block.size())) {
+        if (!withSmdh) {
+            info.smdhLeft = true;
+        } else if (read(layout.metaOffset + SmdhInMeta, block.data(),
+                        block.size())) {
             info.hasSmdh = smdh::parse(block.data(), block.size(), info.smdh);
         }
     }
@@ -259,7 +266,57 @@ std::vector<uint8_t> Stream::takePrefix()
     return taken;
 }
 
-bool readInfo(const std::string &path, Info &info, std::string &error)
+namespace {
+
+// A CIA inside a .zcia. The metadata Azahar adds holds a copy of the name
+// and icon, which saves decompressing the CIA's end for them.
+bool readCompressed(const Reader &file, uint64_t size, Info &info,
+                    std::string &error, bool quick,
+                    const std::atomic<bool> *stop)
+{
+    info = Info();
+    z3ds::Reader reader;
+    reader.stopWhen(stop);
+    if (!reader.open(file, size, error)) {
+        return false;
+    }
+    if (!z3ds::holdsCia(reader.header())) {
+        error = "This compressed file does not hold a CIA.";
+        return false;
+    }
+    smdh::Info upFront;
+    const std::vector<uint8_t> block =
+        z3ds::metadataItem(reader.metadata(), "smdh");
+    const bool hasUpFront = block.size() >= smdh::Size &&
+                            smdh::parse(block.data(), block.size(), upFront);
+
+    std::string readError;
+    const Reader inside = [&](uint64_t offset, void *buffer, size_t count) {
+        return reader.read(offset, buffer, count, readError);
+    };
+    const bool ok =
+        readInfo(inside, reader.size(), info, error, !quick && !hasUpFront);
+    // What went wrong decompressing says more than what could not be read.
+    if (!readError.empty()) {
+        error = readError;
+        return false;
+    }
+    if (!ok) {
+        return false;
+    }
+    info.compressed = true;
+    if (hasUpFront) {
+        info.hasSmdh = true;
+        info.smdh = std::move(upFront);
+        info.smdhLeft = false;
+    }
+    return true;
+}
+
+} // namespace
+
+bool readInfo(const std::string &path, Info &info, std::string &error,
+              bool quick, const std::atomic<bool> *stop)
 {
     std::FILE *file = std::fopen(path.c_str(), "rb");
     if (file == nullptr) {
@@ -267,6 +324,8 @@ bool readInfo(const std::string &path, Info &info, std::string &error)
         error = "Could not open the file.";
         return false;
     }
+    // Reads go straight to the card, as a .zcia's are large ones.
+    std::setvbuf(file, nullptr, _IONBF, 0);
     uint64_t size = 0;
     if (fseeko(file, 0, SEEK_END) == 0) {
         const off_t end = ftello(file);
@@ -276,7 +335,13 @@ bool readInfo(const std::string &path, Info &info, std::string &error)
         return fseeko(file, static_cast<off_t>(offset), SEEK_SET) == 0 &&
                std::fread(buffer, 1, count, file) == count;
     };
-    const bool ok = readInfo(reader, size, info, error);
+    uint8_t header[z3ds::HeaderSize];
+    z3ds::Header compressed;
+    const bool ok =
+        reader(0, header, sizeof(header)) &&
+            z3ds::parseHeader(header, sizeof(header), compressed)
+            ? readCompressed(reader, size, info, error, quick, stop)
+            : readInfo(reader, size, info, error);
     std::fclose(file);
     return ok;
 }
@@ -287,12 +352,14 @@ bool isCiaFile(const std::string &path)
     if (file == nullptr) {
         return false;
     }
-    uint8_t header[0x10];
-    const bool ok = std::fread(header, 1, sizeof(header), file) ==
-                        sizeof(header) &&
-                    looksLikeCia(header, sizeof(header));
+    uint8_t header[z3ds::HeaderSize];
+    const size_t got = std::fread(header, 1, sizeof(header), file);
     std::fclose(file);
-    return ok;
+    z3ds::Header compressed;
+    if (z3ds::parseHeader(header, got, compressed)) {
+        return z3ds::holdsCia(compressed);
+    }
+    return got >= 0x10 && looksLikeCia(header, got);
 }
 
 std::string titleIdText(uint64_t titleId)
