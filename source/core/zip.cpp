@@ -523,16 +523,30 @@ archives::Result extract(const std::string &zipPath, const Archive &archive,
             continue;
         }
         if (!only.empty() && only.count(entry->path) == 0) {
+            if (options.place && !entry->directory) {
+                ++result.skippedPlaced;
+            }
             continue;
         }
+        std::string moved;
+        if (options.place) {
+            moved = options.place(entry->path, entry->directory);
+            if (moved.empty()) {
+                if (!entry->directory) {
+                    ++result.skippedPlaced;
+                }
+                continue;
+            }
+        }
+        const std::string &written = options.place ? moved : entry->path;
         if (entry->directory) {
-            if (!writer.makeFolder(entry->path)) {
+            if (!writer.makeFolder(written)) {
                 result.message = writer.error();
                 return result;
             }
             continue;
         }
-        progress.current = entry->path;
+        progress.current = written;
         if (!readable(*entry)) {
             ++result.skippedUnsupported;
             progress.bytes += entry->size;
@@ -541,14 +555,14 @@ archives::Result extract(const std::string &zipPath, const Archive &archive,
         }
 
         const archives::Writer::Start start =
-            writer.start(entry->path, static_cast<int64_t>(std::min<uint64_t>(
-                                          entry->size, INT64_MAX)));
+            writer.start(written, static_cast<int64_t>(std::min<uint64_t>(
+                                     entry->size, INT64_MAX)));
         if (start == archives::Writer::Start::Failed) {
             result.message = writer.error();
             return result;
         }
         if (start == archives::Writer::Start::Skip) {
-            result.skippedExisting.push_back(entry->path);
+            result.skippedExisting.push_back(written);
             progress.bytes += entry->size;
             ++progress.files;
             observer.onProgress(progress);

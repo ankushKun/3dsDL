@@ -1155,6 +1155,49 @@ void App::receiveScreen()
         return true;
     };
 
+    // A sender's extract=1, once its archive is saved. A full read, as every
+    // entry is checked before anything is asked; only compressed tars and
+    // solid RARs cost more that way. agreed: the console said yes before the
+    // download.
+    const auto offerSentExtraction = [&](const QueueResult &result,
+                                         bool agreed) {
+        SentExtraction sent;
+        std::string error;
+        if (!screens::readArchive(result.path, archives::Scan::Full,
+                                  sent.listing, error)) {
+            if (!error.empty()) {
+                ui::message("Cannot Extract", error, ui::Tone::Error,
+                            "Saved as " + result.path + ".");
+            }
+            return;
+        }
+        archives::Listing shown;
+        // The server's name, not the one kept beside an older copy, so a
+        // second send goes into the same folder.
+        if (!remote::sentExtraction(sent.listing, result.filename,
+                                    sent.options, shown)) {
+            logging::warn("extract.refused", {{"file", basename(result.path)}});
+            ui::message("Not Extracted",
+                        "A sent archive only goes into one folder in /3ds/.",
+                        ui::Tone::Warning, "Saved as " + result.path + ".");
+            return;
+        }
+        sent.agreed = agreed;
+        // The page's text names no file, as any device on the network sees it.
+        sent.extracting = [&](bool started) {
+            if (started) {
+                job.setState("busy", "Extracting on the 3DS.", true);
+            } else {
+                job.setState("choosing", "Waiting for you to choose on the 3DS.",
+                             true);
+            }
+        };
+        job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
+        offerExtraction(result.path, remote::ArchiveTarget,
+                        "Saved as " + result.path + ".",
+                        "Extract it into /3ds/?", &shown, &sent);
+    };
+
     // What a sender handed over: CIAs on the SD card to install, or links.
     const auto handle = [&](net::Received &received) {
         logging::info("receive.got",
@@ -1162,7 +1205,8 @@ void App::receiveScreen()
                        {"cias", received.install.size()},
                        {"fbi", received.replySocket >= 0},
                        {"folder", received.options.folder},
-                       {"replace", received.options.replace ? "yes" : ""}});
+                       {"replace", received.options.replace ? "yes" : ""},
+                       {"extract", received.options.extract ? "yes" : ""}});
         const std::string who = whoIs(received.device, received.from);
         const std::vector<ui::Fact> from = {
             {"From", senderOf(received.device, received.from)}};
@@ -1260,6 +1304,37 @@ void App::receiveScreen()
                                  plural(count, "CIA") + " on the 3DS.",
                        done == count, true);
         } else if (choice == Choice::Download) {
+            // With Ask to Extract off, a sender's extract=1 on links to
+            // archives is put to the console now, before anything downloads,
+            // starting on Not Now. With it on, archives are offered after.
+            bool agreed = false;
+            if (options.extract && !settings_.offerZipExtraction) {
+                const size_t archiveLinks = static_cast<size_t>(std::count_if(
+                    received.links.begin(), received.links.end(),
+                    [](const std::string &link) {
+                        return filetype::fromName(nameOf(link)) ==
+                               filetype::Kind::Archive;
+                    }));
+                if (archiveLinks > 0) {
+                    ui::Dialog question;
+                    question.header = "Receive";
+                    question.title =
+                        archiveLinks == 1
+                            ? "Extract the archive after it downloads?"
+                            : "Extract the archives after they download?";
+                    question.tone = ui::Tone::Info;
+                    question.buttons = {"Extract", "Not Now"};
+                    question.initial = 1;
+                    question.cancelButton = 1;
+                    // Two facts, as the top screen fits beside four names.
+                    std::vector<ui::Fact> where = from;
+                    where.push_back({"Extract to", remote::ArchiveTarget});
+                    question.drawTop = [&]() { drawHandedOver(names, where); };
+                    agreed = ui::choose(question) == 0;
+                }
+            }
+            const bool extract =
+                options.extract && (agreed || settings_.offerZipExtraction);
             const uint64_t first = nextQueueId_;
             addToQueue(received.links, folder, false);
             std::vector<uint64_t> ids;
@@ -1313,6 +1388,20 @@ void App::receiveScreen()
                                       result.name, result.path, result.bytes,
                                       result.message, clockNow());
                 installed += result.status == HistoryStatus::Installed ? 1 : 0;
+            }
+            for (const QueueResult &result : results) {
+                if (!extract || stopped || !ui::keepRunning()) {
+                    break;
+                }
+                // A yes covers the links that looked like archives when it
+                // was asked; any other archive is offered starting on Not Now.
+                if (result.status == HistoryStatus::Saved &&
+                    filetype::fromName(basename(result.path)) ==
+                        filetype::Kind::Archive) {
+                    offerSentExtraction(
+                        result, agreed && filetype::fromName(nameOf(result.url)) ==
+                                              filetype::Kind::Archive);
+                }
             }
             // What a stop left behind is still in the Queue.
             receiveLog_.settleLinks(RowState::Queued, clockNow());

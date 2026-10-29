@@ -1,5 +1,6 @@
 #include "remote.hpp"
 
+#include "archives.hpp"
 #include "file_ops.hpp"
 #include "finalize.hpp"
 #include "naming.hpp"
@@ -434,6 +435,7 @@ bool sendOptions(const std::string &form, SendOptions &out, std::string &why)
         out.folder = path.back() == '/' ? path : path + "/";
     }
     out.replace = formValue(form, "replace") == "1";
+    out.extract = formValue(form, "extract") == "1";
     return true;
 }
 
@@ -483,6 +485,92 @@ std::string replaceCandidate(const std::string &path, const std::string &filenam
     }
     const std::string older = finalize::keptBeside(path, filename);
     return older.empty() || saved.count(text::lower(older)) > 0 ? "" : older;
+}
+
+bool sentArchive(const std::vector<std::string> &paths,
+                 const std::string &filename, SentArchive &out)
+{
+    out = SentArchive();
+    const auto head = [](const std::string &path) {
+        return text::lower(path.substr(0, path.find('/')));
+    };
+    bool fromRoot = false;
+    bool inFolder = false; // something is inside its one top
+    std::set<std::string> tops;
+    for (const std::string &path : paths) {
+        const std::string top = head(path);
+        fromRoot = fromRoot || top == "3ds" || top == "cias" || top == "luma" ||
+                   top == "gm9";
+        inFolder = inFolder || path.find('/') != std::string::npos;
+        tops.insert(top);
+    }
+    if (fromRoot) {
+        out.strip = "3ds/";
+        tops.clear();
+        for (const std::string &path : paths) {
+            if (path.size() > 4 && text::lower(path).rfind("3ds/", 0) == 0) {
+                tops.insert(head(path.substr(4)));
+            }
+        }
+        if (tops.size() != 1) {
+            return false;
+        }
+        out.top = *tops.begin();
+    } else if (tops.size() == 1 && inFolder) {
+        out.top = *tops.begin();
+    } else {
+        out.prefix = naming::safeFilename(naming::asciiFilename(
+                         naming::archiveStem(filename))) +
+                     "/";
+        out.top = text::lower(out.prefix.substr(0, out.prefix.size() - 1));
+    }
+    return !out.top.empty() && out.top[0] != '.' &&
+           sendFolderAllowed(ArchiveTarget + out.top);
+}
+
+std::string sentArchivePlace(const SentArchive &archive,
+                             const std::string &path, bool directory)
+{
+    const size_t strip = archive.strip.size();
+    if (path.size() <= strip ||
+        text::lower(path.substr(0, strip)) != archive.strip) {
+        return ""; // the 3ds folder itself, or what is beside it
+    }
+    const std::string placed = archive.prefix + path.substr(strip);
+    const std::string name = placed.substr(placed.find_last_of('/') + 1);
+    const bool allowed =
+        text::lower(placed.substr(0, placed.find('/'))) == archive.top &&
+        sendFolderAllowed(ArchiveTarget + placed) &&
+        (directory ||
+         (sentNameAllowed(name) && !text::endsWithNoCase(name, ".firm")));
+    return allowed ? placed : "";
+}
+
+bool sentExtraction(const archives::Listing &listing,
+                    const std::string &filename, archives::Options &options,
+                    archives::Listing &shown)
+{
+    std::vector<std::string> paths;
+    paths.reserve(listing.entries.size());
+    for (const archives::Entry &entry : listing.entries) {
+        if (!entry.path.empty() && !archives::macMetadata(entry.path)) {
+            paths.push_back(entry.path);
+        }
+    }
+    SentArchive archive;
+    if (!sentArchive(paths, filename, archive)) {
+        return false;
+    }
+    options.place = [archive](const std::string &path, bool directory) {
+        return sentArchivePlace(archive, path, directory);
+    };
+    // libarchive takes a ZIP's names from its local headers, which need not
+    // be the ones its listing showed; 3dsDL's own reader writes the listing's.
+    if (listing.format == "ZIP" && !listing.ownZip) {
+        options.only = std::move(paths);
+    }
+    shown = archives::placed(listing, options.place);
+    return shown.fileCount > 0;
 }
 
 const char *mimeType(const std::string &name)

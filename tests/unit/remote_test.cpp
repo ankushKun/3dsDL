@@ -1,5 +1,6 @@
 #include "../check.hpp"
 
+#include "archives.hpp"
 #include "remote.hpp"
 
 #include <string>
@@ -113,6 +114,11 @@ TEST("remote: a sender can name a folder for apps or CIAs, and ask to replace")
     CHECK(remote::sendOptions("links=x&folder=%2F3ds%2F&replace=1", options, why));
     CHECK_EQ(options.folder, std::string("sdmc:/3ds/"));
     CHECK(options.replace);
+    CHECK(!options.extract);
+    CHECK(remote::sendOptions("links=x&extract=1", options, why));
+    CHECK(options.extract);
+    CHECK(remote::sendOptions("links=x&extract=yes", options, why));
+    CHECK(!options.extract);
     CHECK(remote::sendOptions("folder=%2F3DS%2FChecker+Board", options, why));
     CHECK_EQ(options.folder, std::string("sdmc:/3DS/Checker Board/"));
     CHECK(remote::sendOptions("folder=%2Fcias", options, why));
@@ -287,4 +293,112 @@ TEST("remote: where an upload stands in the page's batch")
         request.headers["x-3dsdl-batch"] = bad;
         CHECK(!remote::uploadBatch(request, batch));
     }
+}
+
+TEST("remote: a sender's archive goes into one folder in /3ds/")
+{
+    remote::SentArchive archive;
+    // Laid out from the card's root, as most are: the app in its 3ds folder
+    // goes into /3ds/ and the rest stays in the archive.
+    CHECK(remote::sentArchive({"3ds", "3ds/App", "3ds/App/App.3dsx",
+                               "3ds/App/data/level.bin", "App.cia",
+                               "README.md"},
+                              "anything.zip", archive));
+    CHECK_EQ(archive.top, std::string("app"));
+    CHECK_EQ(remote::sentArchivePlace(archive, "3ds/App/App.3dsx", false),
+             std::string("App/App.3dsx"));
+    CHECK_EQ(remote::sentArchivePlace(archive, "3DS/App", true),
+             std::string("App"));
+    for (const char *beside : {"3ds", "App.cia", "README.md",
+                               "luma/plugins/default.3gx", "3dsx/a.3dsx",
+                               "3ds/Other/x.3dsx"}) {
+        CHECK_EQ(remote::sentArchivePlace(archive, beside, false),
+                 std::string(""));
+    }
+    for (const char *never : {"3ds/App/payload.firm", "3ds/App/boot.3dsx",
+                              "3ds/App/APP~1/x", "3ds/App/BOOT~1.FIR",
+                              "3ds/App/3dsDL.3dsx",
+                              "3ds/App/3d\xc5\xbf" "DL.3dsx"}) {
+        CHECK_EQ(remote::sentArchivePlace(archive, never, false),
+                 std::string(""));
+    }
+    // One file in its 3ds folder is fine too.
+    CHECK(remote::sentArchive({"3ds/Top.3dsx", "cias/Top.cia"}, "t.zip",
+                              archive));
+    CHECK_EQ(remote::sentArchivePlace(archive, "3ds/Top.3dsx", false),
+             std::string("Top.3dsx"));
+    // Two things in it, nothing in it, or 3dsDL's own: not extracted.
+    CHECK(!remote::sentArchive({"3ds/A/a.3dsx", "3ds/B/b.3dsx"}, "t.zip",
+                               archive));
+    CHECK(!remote::sentArchive({"3ds/A/a.3dsx", "3ds/a.3dsx"}, "t.zip",
+                               archive));
+    CHECK(!remote::sentArchive({"cias/x.cia", "luma/plugins/x.3gx"}, "t.zip",
+                               archive));
+    CHECK(!remote::sentArchive({"3ds/3dsDL/seeddb.bin"}, "t.zip", archive));
+    CHECK(!remote::sentArchive({"3ds/3DSDL~1/x"}, "t.zip", archive));
+
+    // One folder at its top: that folder, as it is.
+    CHECK(remote::sentArchive({"Game", "Game/Game.3dsx", "Game/luma/x"},
+                              "whatever.zip", archive));
+    CHECK_EQ(remote::sentArchivePlace(archive, "Game/Game.3dsx", false),
+             std::string("Game/Game.3dsx"));
+    CHECK_EQ(remote::sentArchivePlace(archive, "Game/luma/x", false),
+             std::string("Game/luma/x"));
+    CHECK_EQ(remote::sentArchivePlace(archive, "Other/x", false),
+             std::string(""));
+    // Anything else: whole, into a folder of its name, made ASCII.
+    CHECK(remote::sentArchive({"Game.3dsx", "data/level.bin"},
+                              "Some Game v2.zip", archive));
+    CHECK_EQ(remote::sentArchivePlace(archive, "Game.3dsx", false),
+             std::string("Some Game v2/Game.3dsx"));
+    CHECK_EQ(remote::sentArchivePlace(archive, "data", true),
+             std::string("Some Game v2/data"));
+    CHECK(remote::sentArchive({"a.bin"}, "Pok\xc3\xa9mon.zip", archive));
+    CHECK_EQ(remote::sentArchivePlace(archive, "a.bin", false),
+             std::string("Pok_mon/a.bin"));
+    CHECK(!remote::sentArchive({"a.bin"}, "3dsDL.zip", archive));
+    CHECK(!remote::sentArchive({"a.bin"}, "3DSDL~1.ZIP", archive));
+    CHECK(!remote::sentArchive({"a.bin"}, ".zip", archive));
+    // A folder of its own past ASCII is not renamed: not extracted.
+    CHECK(!remote::sentArchive({"Pok\xc3\xa9mon/a.3dsx"}, "p.zip", archive));
+}
+
+TEST("remote: extracting a sender's archive, from its listing")
+{
+    archives::Listing listing;
+    listing.format = "ZIP";
+    listing.complete = true;
+    for (const char *path : {"3ds/App", "3ds/App/App.3dsx", "App.cia"}) {
+        archives::Entry entry;
+        entry.path = path;
+        entry.directory = std::string(path) == "3ds/App";
+        entry.size = entry.directory ? 0 : 10;
+        listing.entries.push_back(entry);
+    }
+    listing.fileCount = 2;
+    listing.totalSize = 20;
+
+    // libarchive reads this ZIP: held to the listing's names.
+    archives::Options options;
+    archives::Listing shown;
+    CHECK(remote::sentExtraction(listing, "App.zip", options, shown));
+    CHECK_EQ(options.only.size(), static_cast<size_t>(3));
+    CHECK_EQ(options.place("3ds/App/App.3dsx", false),
+             std::string("App/App.3dsx"));
+    CHECK_EQ(shown.fileCount, 1u);
+    CHECK_EQ(shown.totalSize, static_cast<uint64_t>(10));
+    CHECK_EQ(shown.top, std::string("App"));
+    CHECK(shown.topIsFolder);
+
+    // 3dsDL's own reader writes the listing's names, so only stays empty.
+    listing.ownZip = true;
+    archives::Options own;
+    CHECK(remote::sentExtraction(listing, "App.zip", own, shown));
+    CHECK(own.only.empty());
+
+    // Its one app is an empty folder: nothing would be extracted.
+    listing.entries.resize(2);
+    listing.entries[1].path = "cias/App.cia";
+    archives::Options none;
+    CHECK(!remote::sentExtraction(listing, "App.zip", none, shown));
 }

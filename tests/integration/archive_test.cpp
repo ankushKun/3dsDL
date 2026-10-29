@@ -3,6 +3,7 @@
 
 #include "archives.hpp"
 #include "fs_util.hpp"
+#include "remote.hpp"
 
 #include <archive.h>
 #include <archive_entry.h>
@@ -134,6 +135,20 @@ archives::Result run(const std::string &path, const archives::Listing &listing,
     archives::Options options;
     options.existing = existing;
     options.only = std::move(only);
+    Quiet observer;
+    return archives::extract(path, listing, folder, options, observer);
+}
+
+// Only what is under top/ is extracted, without the top/.
+archives::Result runUnder(const std::string &path,
+                          const archives::Listing &listing,
+                          const std::string &folder, const std::string &top)
+{
+    archives::Options options;
+    options.place = [top](const std::string &entry, bool) {
+        return entry.rfind(top, 0) == 0 ? entry.substr(top.size())
+                                        : std::string();
+    };
     Quiet observer;
     return archives::extract(path, listing, folder, options, observer);
 }
@@ -751,4 +766,143 @@ TEST("archives: space needed counts whole clusters and folders")
     // 1 cluster + 2 clusters for the files, and folders a and a/b.
     CHECK_EQ(archives::spaceNeeded(listing, 4096),
              static_cast<uint64_t>(5 * 4096));
+}
+
+TEST("archives: place moves entries or leaves them out, in both readers")
+{
+    // 3dsDL's own ZIP reader.
+    TempDir zip;
+    archives::Listing listing;
+    std::string error;
+    CHECK(archives::read(fixture("basic.zip"), archives::Scan::Quick, listing,
+                         error));
+    CHECK(listing.ownZip);
+    archives::Result result =
+        runUnder(fixture("basic.zip"), listing, zip.path(), "3ds/");
+    CHECK(result.ok);
+    CHECK_EQ(result.extracted, 1u);
+    CHECK_EQ(result.skippedPlaced, 2u); // readme.txt and empty.txt
+    CHECK_EQ(readAll(zip.path() + "App/App.3dsx"), binary());
+    CHECK(!fs::fileExists(zip.path() + "readme.txt"));
+    CHECK(!fs::directoryExists(zip.path() + "3ds"));
+
+    // The listing as it would be extracted, for what the console shows.
+    const archives::Listing moved =
+        archives::placed(listing, [](const std::string &entry, bool) {
+            return entry.rfind("3ds/", 0) == 0 ? entry.substr(4) : std::string();
+        });
+    CHECK_EQ(moved.fileCount, 1u);
+    CHECK_EQ(moved.totalSize, static_cast<uint64_t>(binary().size()));
+    CHECK_EQ(moved.top, std::string("App"));
+    CHECK(moved.topIsFolder);
+    CHECK(moved.complete);
+    CHECK(!moved.ownZip); // extracting goes by the archive's own listing
+
+    // libarchive, with a tar.
+    TempDir tar;
+    const std::string path = tar.path() + "pack.tar";
+    CHECK(make(path, ARCHIVE_FORMAT_TAR_USTAR, ARCHIVE_FILTER_NONE, pack()));
+    CHECK(archives::read(path, archives::Scan::Full, listing, error));
+    TempDir out;
+    result = runUnder(path, listing, out.path(), "pack/");
+    CHECK(result.ok);
+    CHECK_EQ(result.extracted, 3u);
+    CHECK_EQ(result.skippedPlaced, 0u);
+    CHECK_EQ(readText(out.path() + "readme.txt"),
+             std::string("hello from an archive\n"));
+    CHECK(fs::directoryExists(out.path() + "empty"));
+    CHECK(!fs::directoryExists(out.path() + "pack"));
+}
+
+TEST("archives: place sees the name a ZIP's entry is written under")
+{
+    TempDir folder;
+    archives::Listing listing;
+    std::string error;
+    CHECK(archives::read(fixture("renamed.zip"), archives::Scan::Quick,
+                         listing, error));
+    CHECK(!listing.ownZip);
+    // The listing has the central directory's names; libarchive reads the
+    // local header's, luma/plugin.3gx, for the first entry.
+    CHECK_EQ(listing.entries.size(), static_cast<size_t>(2));
+    CHECK_EQ(listing.entries[0].path, std::string("3ds/a/abcd.3dsx"));
+
+    std::vector<std::string> listed;
+    for (const archives::Entry &entry : listing.entries) {
+        listed.push_back(entry.path);
+    }
+    archives::Result result = run(fixture("renamed.zip"), listing,
+                                  folder.path(), archives::Existing::Skip,
+                                  listed);
+    CHECK(result.ok);
+    CHECK_EQ(result.extracted, 1u);
+    CHECK(!fs::directoryExists(folder.path() + "luma"));
+    CHECK(!fs::fileExists(folder.path() + "3ds/a/abcd.3dsx"));
+    CHECK_EQ(readText(folder.path() + "3ds/a/bz.txt"),
+             std::string("packed with bzip2\n"));
+
+    TempDir placed;
+    result = runUnder(fixture("renamed.zip"), listing, placed.path(), "3ds/");
+    CHECK(result.ok);
+    CHECK_EQ(result.extracted, 1u);
+    CHECK_EQ(result.skippedPlaced, 1u);
+    CHECK(!fs::directoryExists(placed.path() + "luma"));
+    CHECK_EQ(readText(placed.path() + "a/bz.txt"),
+             std::string("packed with bzip2\n"));
+}
+
+TEST("archives: a sender's archive is extracted into its one folder only")
+{
+    Quiet observer;
+    archives::Listing listing;
+    archives::Options options;
+    archives::Listing shown;
+    std::string error;
+
+    // Laid out from the card's root: its 3ds folder's app, nothing else.
+    CHECK(archives::read(fixture("basic.zip"), archives::Scan::Full, listing,
+                         error));
+    CHECK(remote::sentExtraction(listing, "basic.zip", options, shown));
+    CHECK(options.only.empty()); // 3dsDL's own reader
+    CHECK_EQ(shown.top, std::string("App"));
+    CHECK_EQ(shown.fileCount, 1u);
+    TempDir root;
+    archives::Result result = archives::extract(fixture("basic.zip"), listing,
+                                                root.path(), options, observer);
+    CHECK(result.ok);
+    CHECK_EQ(result.extracted, 1u);
+    CHECK_EQ(result.skippedPlaced, 2u);
+    CHECK_EQ(readAll(root.path() + "App/App.3dsx"), binary());
+
+    // One folder at its top: that folder.
+    CHECK(archives::read(fixture("rooted.zip"), archives::Scan::Full, listing,
+                         error));
+    options = archives::Options();
+    CHECK(remote::sentExtraction(listing, "rooted.zip", options, shown));
+    CHECK_EQ(shown.top, std::string("Game"));
+    CHECK_EQ(shown.fileCount, 2u);
+
+    // libarchive's names held to the listing's, and placed as well.
+    CHECK(archives::read(fixture("renamed.zip"), archives::Scan::Full,
+                         listing, error));
+    options = archives::Options();
+    CHECK(remote::sentExtraction(listing, "renamed.zip", options, shown));
+    CHECK_EQ(options.only.size(), static_cast<size_t>(2));
+    TempDir renamed;
+    result = archives::extract(fixture("renamed.zip"), listing,
+                               renamed.path(), options, observer);
+    CHECK(result.ok);
+    CHECK(!fs::directoryExists(renamed.path() + "luma"));
+    CHECK_EQ(readText(renamed.path() + "a/bz.txt"),
+             std::string("packed with bzip2\n"));
+
+    // Two apps in its 3ds folder: not extracted at all.
+    TempDir made;
+    const std::string two = made.path() + "two.zip";
+    CHECK(make(two, ARCHIVE_FORMAT_ZIP, ARCHIVE_FILTER_NONE,
+               {{"3ds/A/a.3dsx", "a", false, ""},
+                {"3ds/B/b.3dsx", "b", false, ""}}));
+    CHECK(archives::read(two, archives::Scan::Full, listing, error));
+    options = archives::Options();
+    CHECK(!remote::sentExtraction(listing, "two.zip", options, shown));
 }

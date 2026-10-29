@@ -379,16 +379,30 @@ Result extractOther(const std::string &path, const std::string &folder,
             continue;
         }
         if (!only.empty() && only.count(entry.path) == 0) {
+            if (options.place && !entry.directory) {
+                ++result.skippedPlaced;
+            }
             continue;
         }
+        std::string moved;
+        if (options.place) {
+            moved = options.place(entry.path, entry.directory);
+            if (moved.empty()) {
+                if (!entry.directory) {
+                    ++result.skippedPlaced;
+                }
+                continue;
+            }
+        }
+        const std::string &written = options.place ? moved : entry.path;
         if (entry.directory) {
-            if (!writer.makeFolder(entry.path)) {
+            if (!writer.makeFolder(written)) {
                 result.message = writer.error();
                 return result;
             }
             continue;
         }
-        progress.current = entry.path;
+        progress.current = written;
         if (!entry.supported) {
             ++result.skippedUnsupported;
             progress.bytes += entry.size;
@@ -399,13 +413,13 @@ Result extractOther(const std::string &path, const std::string &folder,
         const int64_t size = archive_entry_size_is_set(header)
                                  ? archive_entry_size(header)
                                  : -1;
-        const Writer::Start start = writer.start(entry.path, size);
+        const Writer::Start start = writer.start(written, size);
         if (start == Writer::Start::Failed) {
             result.message = writer.error();
             return result;
         }
         if (start == Writer::Start::Skip) {
-            result.skippedExisting.push_back(entry.path);
+            result.skippedExisting.push_back(written);
             progress.bytes += entry.size;
             ++progress.files;
             observer.onProgress(progress);
@@ -608,6 +622,36 @@ uint64_t spaceNeeded(const Listing &listing, uint64_t clusterSize)
         }
     }
     return total;
+}
+
+Listing placed(const Listing &listing,
+               const std::function<std::string(const std::string &path,
+                                               bool directory)> &place)
+{
+    // Only what is shown and checked for clashes: not the ZIP reader's own
+    // entries, which extracting takes from the archive's listing.
+    Listing out;
+    out.format = listing.format;
+    out.archiveSize = listing.archiveSize;
+    out.complete = listing.complete;
+    for (const Entry &entry : listing.entries) {
+        if (entry.path.empty() || macMetadata(entry.path)) {
+            continue;
+        }
+        std::string path = place(entry.path, entry.directory);
+        if (path.empty()) {
+            continue;
+        }
+        Entry moved;
+        moved.name = entry.name;
+        moved.path = std::move(path);
+        moved.size = entry.size;
+        moved.directory = entry.directory;
+        moved.supported = entry.supported;
+        add(out, std::move(moved));
+    }
+    findTop(out);
+    return out;
 }
 
 Result extract(const std::string &path, const Listing &listing,

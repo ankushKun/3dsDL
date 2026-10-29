@@ -7,6 +7,11 @@
 #include <string>
 #include <vector>
 
+namespace archives {
+struct Listing;
+struct Options;
+} // namespace archives
+
 // Receiving links over the local network. Two ways in:
 //
 // - FBI's remote install protocol on port 5000, which servefiles.py,
@@ -105,15 +110,17 @@ bool localPath(const std::string &root, const std::string &webPath,
                std::string &out);
 
 // What a link sender may ask for besides the links: folder=/3ds/app (a page
-// path, as the file API takes) saves there instead of the Download Folder,
-// and replace=1, with a folder, asks whether a link the queue kept beside a
-// file of the same name should replace it. Any site can open /send, so a
-// sender can name only the folders in sendFolderAllowed, and nothing is
-// replaced without a choice on the console. False, with why, for any other
-// folder.
+// path, as the file API takes) saves there instead of the Download Folder;
+// replace=1, with a folder, asks whether a link the queue kept beside a
+// file of the same name should replace it; extract=1 asks whether to
+// extract an archive into /3ds/ (see SentArchive). Any site can open /send,
+// so a sender can name only the folders in sendFolderAllowed, and nothing
+// is replaced or extracted without a choice on the console. False, with
+// why, for any other folder.
 struct SendOptions {
     std::string folder; // "sdmc:/3ds/app/", or "" for the Download Folder
     bool replace = false;
+    bool extract = false;
 };
 bool sendOptions(const std::string &form, SendOptions &out, std::string &why);
 
@@ -142,6 +149,41 @@ bool sentMayReplace(const std::string &filename);
 std::string replaceCandidate(const std::string &path, const std::string &filename,
                              const std::string &folder,
                              const std::set<std::string> &saved);
+
+// Where an archive a sender asked to extract goes: into one folder in /3ds/,
+// or as one file there, and nowhere else. One laid out from the card's root
+// (a 3ds, cias, luma or gm9 folder at its top) has the one app in its 3ds
+// folder extracted and the rest left out. Any other goes into /3ds/<its one
+// top folder>/, or whole into /3ds/<its name>/. That may be a folder already
+// there, as for an update; the console names it before it asks, and asks
+// about the files already in it. ArchiveTarget is /3ds/ on the card.
+inline constexpr const char *ArchiveTarget = "sdmc:/3ds/";
+struct SentArchive {
+    std::string strip;  // taken off the front of each entry: "3ds/" or ""
+    std::string prefix; // put in its place: "" or "<its name>/"
+    std::string top;    // the one name in /3ds/ it writes under, lower case
+};
+// From the archive's entry paths (as archives::Entry has them) and its file
+// name. False when there is no one folder for it: two things in its 3ds
+// folder or none, or a name for that folder a sender may not use (3dsDL's,
+// a short name, one past ASCII, or one starting with a dot).
+bool sentArchive(const std::vector<std::string> &paths,
+                 const std::string &filename, SentArchive &out);
+// Where an entry goes, relative to ArchiveTarget, or "" to leave it out:
+// anything not under top, 3dsDL's folder and file, FIRMs, boot.3dsx, FAT
+// short names and names past ASCII. Used as archives::Options::place, on the
+// name each entry is written under, so an archive whose listing names one
+// thing and whose data another gets no further either way.
+std::string sentArchivePlace(const SentArchive &archive,
+                             const std::string &path, bool directory);
+// What extracting a sender's archive needs, from its full listing and file
+// name: options that place every entry (and, for a ZIP libarchive reads,
+// hold it to the listing's names), and shown, the listing as it will be
+// placed, to show and check for clashes. False as for sentArchive, or when
+// nothing would be extracted.
+bool sentExtraction(const archives::Listing &listing,
+                    const std::string &filename, archives::Options &options,
+                    archives::Listing &shown);
 
 // The Content-Type to send a file as. Pages and scripts are sent as plain
 // text, so a file opened from the SD card can never run in the page.

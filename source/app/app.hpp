@@ -57,13 +57,27 @@ private:
                                   std::string *message = nullptr);
     void finishDownload(const std::string &address, const std::string &folder,
                         const net::Result &result);
+    // How offerExtraction takes an archive a sender asked to extract
+    // (remote::sentExtraction): known is the listing as options will place
+    // it, which is shown and checked for clashes, and listing is the
+    // archive's own, which the extractors read. It goes into folder only,
+    // with no New Folder; the question starts on Not Now unless the console
+    // said yes before the download, and extracting runs once it is chosen.
+    struct SentExtraction {
+        archives::Options options;
+        archives::Listing listing;
+        bool agreed = false;
+        // Called with true as extracting starts and false once it ends.
+        std::function<void(bool)> extracting;
+    };
     // Asks where to extract an archive, then extracts it. known is a
     // listing already read, such as the archive viewer's.
     void offerExtraction(const std::string &path, const std::string &folder,
                          const std::string &summary,
                          const std::string &title =
                              "Download complete. Extract the archive?",
-                         const archives::Listing *known = nullptr);
+                         const archives::Listing *known = nullptr,
+                         const SentExtraction *sent = nullptr);
 
     // cia::readInfo, with a busy screen while a .zcia without Azahar's copy
     // of its name and icon decompresses its end for them. False with error

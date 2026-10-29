@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -17,6 +18,11 @@ struct Options {
     Existing existing = Existing::Skip;
     // When not empty, only these relative paths are extracted.
     std::vector<std::string> only;
+    // When set, where each entry goes instead of its own path, relative to
+    // the folder, or "" to leave it out. It sees the name an entry is
+    // written under, which for a ZIP read by libarchive can differ from the
+    // name its listing gave.
+    std::function<std::string(const std::string &path, bool directory)> place;
 };
 
 struct Progress {
@@ -39,7 +45,9 @@ struct Result {
     unsigned extracted = 0;
     unsigned skippedUnsafe = 0;      // paths that tried to leave the folder
     unsigned skippedUnsupported = 0; // encrypted, links, unknown compression
-    // Files left alone because they were already there, as relative paths.
+    unsigned skippedPlaced = 0;      // files Options::place left out
+    // Files left alone because they were already there, as relative paths
+    // (where Options::place put them).
     std::vector<std::string> skippedExisting;
     std::string message;
 };

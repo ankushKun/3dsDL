@@ -530,7 +530,8 @@ archives::Result extract(const std::string &path,
         for (const archives::Entry &entry : listing.entries) {
             // What the extractors count: every file with a safe path.
             if (!entry.directory && !entry.path.empty() &&
-                (only.empty() || only.count(entry.path) > 0)) {
+                (only.empty() || only.count(entry.path) > 0) &&
+                (!options.place || !options.place(entry.path, false).empty())) {
                 totalBytes += entry.size;
                 ++totalFiles;
             }
@@ -620,6 +621,9 @@ archives::Result extract(const std::string &path,
                 {"existing", result.skippedExisting.size()},
                 {"unsafe", result.skippedUnsafe},
                 {"unsupported", result.skippedUnsupported},
+                {"placed", result.skippedPlaced > 0
+                               ? std::to_string(result.skippedPlaced)
+                               : std::string()},
                 {"message", result.message}});
     return job.result;
 }
