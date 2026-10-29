@@ -127,7 +127,8 @@ first guess is cap 15 at scale 0.72.
 
 A recessed panel holds rows 27 px tall on a 31 px pitch: white pills with a
 17 px icon, the name and a right-aligned size or badge. Six rows fit; L/R and
-the counter page through the rest. Marked rows turn light blue with a Marked
+the counter page through the rest. In every list a tap highlights a row and
+a tap on the highlighted row opens it. Marked rows turn light blue with a Marked
 badge. The scrollbar's column takes a drag: the thumb follows the stylus, and
 a touch on the track brings the thumb's middle there. A list that fills in
 while open keeps the row at the top of the view in place as rows arrive above

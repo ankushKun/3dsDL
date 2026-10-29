@@ -432,9 +432,6 @@ struct ListSpec {
     u32 extraKeys = 0;     // keys besides A and B that close the list
     // A long press on a row reports this key with that row highlighted.
     u32 longPressKey = 0;
-    // A tap highlights a row and a tap on the highlighted row opens it,
-    // instead of every tap opening, for browsing files and folders.
-    bool tapToSelect = false;
     // Draws the top screen for the highlighted item (index -1 when empty).
     std::function<void(int)> drawTop;
     // For lists that fill in while open: called every frame before drawing,
@@ -450,7 +447,7 @@ struct ListResult {
 };
 
 // Rows scroll smoothly: drag them, flick them, or move with the D-pad, L
-// and R. Tapping a row opens it (or highlights it, with tapToSelect).
+// and R. A tap highlights a row and a tap on the highlighted row opens it.
 ListResult runList(const ListSpec &spec, int &cursor);
 
 // Touch scrolling with momentum for anything taller than its box.

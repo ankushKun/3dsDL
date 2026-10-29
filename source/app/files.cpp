@@ -1022,7 +1022,6 @@ void App::browseFiles(const std::string &select)
         ui::ListSpec spec;
         spec.title = current;
         spec.heading = current;
-        spec.tapToSelect = true;
         spec.emptyText = "This folder is empty.";
         spec.back = atRoot ? "Close" : "Back";
         spec.action = "Options";
