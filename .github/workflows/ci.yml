@@ -20,7 +20,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libcurl4-openssl-dev zlib1g-dev libarchive-dev
+            libcurl4-openssl-dev zlib1g-dev libarchive-dev libzstd-dev
 
       # FAT ignores case and the archive tests check what 3dsDL does about
       # it, so they run in a folder that ignores case too, as macOS's do.

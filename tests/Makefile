@@ -1,6 +1,6 @@
 # Host-side tests for the portable parts of 3dsDL (source/core, source/net and
-# the vendored quirc). They build with the system compiler, libcurl and zlib,
-# and run under AddressSanitizer and UBSan by default.
+# the vendored quirc). They build with the system compiler, libcurl, zlib,
+# libarchive and zstd, and run under AddressSanitizer and UBSan by default.
 #
 #   make -C tests check          unit, integration and script tests
 #   make -C tests unit           unit tests only
@@ -25,13 +25,18 @@ SAN      ?= -fsanitize=address,undefined -fno-sanitize-recover=undefined \
             -fno-omit-frame-pointer
 WARN     := -Wall -Wextra
 CPPFLAGS := -I$(CORE) -I$(NET) -I$(QUIRC) -I$(STB)
-LDLIBS   := -lcurl -larchive -lz -lm
+LDLIBS   := -lcurl -larchive -lzstd -lz -lm
 
-# Homebrew keeps libarchive out of the compiler's paths on macOS.
+# Homebrew keeps libarchive and zstd out of the compiler's paths on macOS.
 ARCHIVE_PREFIX := $(shell brew --prefix libarchive 2>/dev/null)
 ifneq ($(ARCHIVE_PREFIX),)
 CPPFLAGS += -I$(ARCHIVE_PREFIX)/include
 LDLIBS   := -L$(ARCHIVE_PREFIX)/lib $(LDLIBS)
+endif
+ZSTD_PREFIX := $(shell brew --prefix zstd 2>/dev/null)
+ifneq ($(ZSTD_PREFIX),)
+CPPFLAGS += -I$(ZSTD_PREFIX)/include
+LDLIBS   := -L$(ZSTD_PREFIX)/lib $(LDLIBS)
 endif
 
 CXXFLAGS := -std=c++17 -g -O1 $(WARN) -Werror $(SAN) $(CPPFLAGS)
