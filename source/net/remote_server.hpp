@@ -1,5 +1,7 @@
 #pragma once
 
+#include "remote.hpp"
+
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -18,6 +20,8 @@ struct Received {
     // CIAs on the SD card (local paths) the page asked to install.
     std::vector<std::string> install;
     std::string from; // the sender's address
+    // What the sender is, from its browser ("iPhone"); "" for FBI's tools.
+    std::string device;
     // FBI's tools wait on this connection for one byte, sent by
     // finishReceived once the links are done. -1 for the web page.
     int replySocket = -1;
@@ -27,15 +31,25 @@ struct Received {
 // and closes the connection.
 void finishReceived(Received &received);
 
-// A file going to or coming from the SD card through the page.
+// A file going to or coming from the SD card through the page. Files the
+// page only shows, such as pictures, are not reported.
 struct Transfer {
     std::string name;
+    std::string path; // on the SD card ("sdmc:/cias/a.cia")
     std::string from;
-    bool upload = true; // false when the page is downloading it
+    std::string device; // as in Received
+    bool upload = true; // false when the page is saving it from the card
     uint64_t done = 0;
     uint64_t total = 0;
     bool finished = false; // the last report for this file
     bool ok = false;       // with finished: the whole file went through
+    // With finished and not ok: what went wrong on the console, or "" when
+    // the sender stopped or the connection was lost.
+    std::string message;
+    // Where the page's batch stands, with its folder mapped onto the SD card
+    // ("sdmc:/3ds/Checkpoint"). An upload from anything else, such as curl,
+    // has none: an empty id.
+    remote::UploadBatch batch;
 };
 
 enum class Access { Allowed, Pending, Denied, Unknown };
@@ -61,9 +75,11 @@ struct FileSharing {
     std::string root; // "sdmc:"
     // Whether the device at an address may use the files. When ask is set
     // and the device is unknown, the console asks and the answer is Pending
-    // until it is given; without ask an unknown device is Unknown. Unset
-    // allows everyone.
-    std::function<Access(const std::string &from, bool ask)> access;
+    // until it is given; without ask an unknown device is Unknown. device
+    // names it for that question, as in Received. Unset allows everyone.
+    std::function<Access(const std::string &from, const std::string &device,
+                         bool ask)>
+        access;
     std::function<int64_t()> freeSpace;  // bytes, or -1 when unknown
     std::function<int64_t()> totalSpace; // bytes, or -1 when unknown
     // Unset reports "ready" with no text.
@@ -72,6 +88,9 @@ struct FileSharing {
     std::string appVersion;
     // Called a few times a second during a transfer, on the server's thread.
     std::function<void(const Transfer &)> progress;
+    // Called on the server's thread with each path the page has written,
+    // made, moved (both ends) or removed, once it has.
+    std::function<void(const std::string &path)> changed;
     // Called with true as a request starts and false as it ends, on the
     // server's thread, for every request but the page's status poll, which
     // runs for as long as the page is open. The app keeps the console awake

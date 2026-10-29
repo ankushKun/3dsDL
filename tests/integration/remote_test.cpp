@@ -334,6 +334,7 @@ TEST("remote server: files go up, come back, move and go away")
     TempRoot root;
     std::mutex lock;
     std::vector<net::Transfer> finished;
+    std::vector<std::string> changed;
     net::FileSharing sharing;
     sharing.root = root.path;
     sharing.freeSpace = []() { return static_cast<int64_t>(1) << 30; };
@@ -342,6 +343,10 @@ TEST("remote server: files go up, come back, move and go away")
             std::lock_guard<std::mutex> hold(lock);
             finished.push_back(transfer);
         }
+    };
+    sharing.changed = [&](const std::string &path) {
+        std::lock_guard<std::mutex> hold(lock);
+        changed.push_back(path);
     };
     net::Receiver receiver;
     std::string error;
@@ -386,6 +391,13 @@ TEST("remote server: files go up, come back, move and go away")
         CHECK_EQ(finished.size(), static_cast<size_t>(1));
         CHECK(finished.back().ok && finished.back().upload);
         CHECK_EQ(finished.back().done, static_cast<uint64_t>(contents.size()));
+        CHECK_EQ(finished.back().path, root.path + "/cia/a b.bin");
+        CHECK(finished.back().batch.id.empty());
+        CHECK_EQ(changed.size(), static_cast<size_t>(2));
+        CHECK_EQ(changed[0], root.path + "/cia");
+        CHECK_EQ(changed[1], root.path + "/cia/a b.bin");
+        finished.clear();
+        changed.clear();
     }
 
     // Replacing has to be asked for.
@@ -400,6 +412,17 @@ TEST("remote server: files go up, come back, move and go away")
     CHECK(bodyOf(response) == "new");
     CHECK(response.find("Content-Security-Policy: sandbox") != std::string::npos);
     CHECK(response.find("attachment; filename=\"a b.bin\"") != std::string::npos);
+    // Only a file saved from the page is reported, not one it shows.
+    CHECK(bodyOf(get(port, "/api/file?path=%2Fcia%2Fa%20b.bin")) == "new");
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        // The refused upload, the replacing one and the download.
+        CHECK_EQ(finished.size(), static_cast<size_t>(3));
+        CHECK(!finished[0].ok && finished[0].message == "a b.bin already exists.");
+        CHECK(finished[1].ok);
+        CHECK(!finished[2].upload && finished[2].ok);
+        CHECK_EQ(finished[2].done, static_cast<uint64_t>(3));
+    }
 
     response = get(port, "/api/list?path=%2Fcia");
     CHECK(bodyOf(response).find("{\"name\":\"a b.bin\",\"dir\":false,\"size\":3,") !=
@@ -420,6 +443,14 @@ TEST("remote server: files go up, come back, move and go away")
     CHECK(startsWith(post(port, "/api/delete", "path=%2Fcia"), "HTTP/1.1 200"));
     CHECK(!fs::directoryExists(root.path + "/cia"));
     CHECK(startsWith(post(port, "/api/delete", "path=%2F"), "HTTP/1.1 400"));
+    {
+        std::lock_guard<std::mutex> hold(lock);
+        // The replaced file, both ends of the move, then the deleted folder.
+        const std::vector<std::string> expected = {
+            root.path + "/cia/a b.bin", root.path + "/cia/a b.bin",
+            root.path + "/game.cia", root.path + "/cia"};
+        CHECK(changed == expected);
+    }
 
     const std::vector<net::Received> arrived = serving.arrived();
     CHECK_EQ(arrived.size(), static_cast<size_t>(1));
@@ -542,8 +573,9 @@ TEST("remote server: the file API turns away what it should")
     net::FileSharing sharing;
     sharing.root = root.path;
     bool asked = false;
-    sharing.access = [&](const std::string &from, bool ask) {
+    sharing.access = [&](const std::string &from, const std::string &device, bool ask) {
         CHECK_EQ(from, std::string("127.0.0.1"));
+        CHECK(device.empty());
         asked = asked || ask;
         return access;
     };
@@ -662,7 +694,7 @@ TEST("remote server: status, links for the page, hidden files and titles")
     net::FileSharing sharing;
     sharing.root = root.path;
     bool allowed = false;
-    sharing.access = [&](const std::string &from, bool ask) {
+    sharing.access = [&](const std::string &from, const std::string &, bool ask) {
         std::lock_guard<std::mutex> hold(lock);
         if (allowed) {
             return net::Access::Allowed;
@@ -726,4 +758,66 @@ TEST("remote server: status, links for the page, hidden files and titles")
     response = get(port, "/api/icon?path=%2Fbroken.cia");
     CHECK(startsWith(response, "HTTP/1.1 404"));
     CHECK(bodyOf(response).find("error") != std::string::npos);
+}
+
+TEST("remote server: uploads say who sent them and where they stand in the batch")
+{
+    TempRoot root;
+    std::mutex lock;
+    std::vector<net::Transfer> finished;
+    std::string asking;
+    net::FileSharing sharing;
+    sharing.root = root.path;
+    sharing.access = [&](const std::string &, const std::string &device, bool ask) {
+        std::lock_guard<std::mutex> hold(lock);
+        if (ask) {
+            asking = device;
+        }
+        return net::Access::Allowed;
+    };
+    sharing.progress = [&](const net::Transfer &transfer) {
+        if (transfer.finished) {
+            std::lock_guard<std::mutex> hold(lock);
+            finished.push_back(transfer);
+        }
+    };
+    net::Receiver receiver;
+    std::string error;
+    CHECK(receiver.open(0, 0, 0, error));
+    receiver.shareFiles(sharing);
+    Serving serving(receiver);
+    const unsigned short port = receiver.webPort();
+    CHECK(fs::makeDirectories(root.path + "/3ds/Check point/saves"));
+
+    const auto send = [&](const std::string &target, const std::string &batch) {
+        return roundTrip(port, "PUT " + target +
+                                   " HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                                   "X-Requested-With: 3dsDL\r\n"
+                                   "User-Agent: Mozilla/5.0 (iPhone; CPU iPhone OS 18_0)\r\n"
+                                   "X-3dsDL-Batch: " + batch + "\r\n"
+                                   "Content-Length: 2\r\n\r\nok");
+    };
+    CHECK(startsWith(send("/api/file?path=%2F3ds%2FCheck%20point%2Fsaves%2Fa",
+                          "q7 2 3 2 6 2 %2F3ds%2FCheck%20point"),
+                     "HTTP/1.1 200"));
+    // A folder the file is not in is not taken for its own.
+    CHECK(startsWith(send("/api/file?path=%2Fb", "q7 3 3 4 6 2 %2F3ds%2FCheck%20point"),
+                     "HTTP/1.1 200"));
+    std::lock_guard<std::mutex> hold(lock);
+    CHECK_EQ(asking, std::string("iPhone"));
+    CHECK_EQ(finished.size(), static_cast<size_t>(2));
+    if (finished.size() == 2) {
+        const remote::UploadBatch &first = finished[0].batch;
+        CHECK_EQ(finished[0].device, std::string("iPhone"));
+        CHECK_EQ(first.id, std::string("q7"));
+        CHECK_EQ(first.position, static_cast<uint32_t>(2));
+        CHECK_EQ(first.count, static_cast<uint32_t>(3));
+        CHECK_EQ(first.before, static_cast<uint64_t>(2));
+        CHECK_EQ(first.bytes, static_cast<uint64_t>(6));
+        CHECK_EQ(first.folder, root.path + "/3ds/Check point");
+        CHECK_EQ(first.folderFiles, static_cast<uint32_t>(2));
+        CHECK_EQ(finished[1].batch.position, static_cast<uint32_t>(3));
+        CHECK(finished[1].batch.folder.empty());
+        CHECK_EQ(finished[1].batch.folderFiles, static_cast<uint32_t>(0));
+    }
 }

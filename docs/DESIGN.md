@@ -133,7 +133,7 @@ a touch on the track brings the thumb's middle there. A list that fills in
 while open keeps the row at the top of the view in place as rows arrive above
 it; only a list nobody has touched stays at its first row. A list can put an
 action at the right end of its heading for what changes the whole list, as a
-key cap and a word in the heading's ink (Files' X Sort, matching the Software lists' X Sort tab), never a pill.
+key cap and a word in the heading's ink (Files' X Sort, matching the Software lists' X Sort tab), never a pill. A row on its way carries a thin progress bar along its foot.
 
 ### Dialogs
 
@@ -149,7 +149,7 @@ strip for a red button and a 30 px dark Cancel strip.
 | Home | app icon, name, download folder and version | Settings and Queue bars, six tiles (Scan QR Code, Enter URL, Receive; History, Files, Titles), Close bar |
 | Scan QR code | camera with corner brackets, status strip at the bottom | title, Type a URL Instead, Back |
 | Confirm download | file, host, URL, Save to and HTTPS tags | Download, Add to Queue, Change Folder, Cancel |
-| Downloading | file, progress, amounts, speed, connections tag | saving to, Cancel |
+| Downloading | file, progress, amounts, speed and its connections tag, the time left across from them (units::timeLeft, as every progress screen and the page say it) | saving to, Cancel |
 | File exists | which file and what each choice does | dialog: Keep Both / Replace / Cancel |
 | Install prompt | icon, name, publisher, Title ID, Version, Size | Install, Install and Delete File, Keep File |
 | Installing | icon, name, progress | do not turn off |
@@ -164,6 +164,8 @@ strip for a red button and a 30 px dark Cancel strip.
 | CIA details | icon, name, Title ID, Version, Size | Install, Install and Delete File, Delete File |
 | Delete | what goes and how big it is | destructive dialog |
 | History | the highlighted download in full | rows with Installed, Resume, Saved, Failed badges |
+| Receive | QR code for the page, the address in large type and http://3ds.local under it; while a file is on its way, its progress as Downloading shows it, with the address at the end of the dotted line | what came in and went out since 3dsDL started, newest first: a bar on what is on its way, the size of what arrived, Installed, Failed, Sent, Queued and Stopped badges, Back |
+| Received row | the row's name and facts | Install, Install and Delete File, Show in Files |
 | Settings | the highlighted section's current values | About and Updates bars, four tiles, Back / Report Issue |
 | Report an Issue | QR code, name and address of the highlighted place | Report a Bug, Discord Server, Developer on X; the Details row to mention, and the Crash Log row when there is one; Back |
 | Setting choice | the setting's icon | recessed options, the current one chosen |

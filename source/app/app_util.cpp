@@ -37,6 +37,40 @@ std::string basename(const std::string &path)
     return path.substr(path.find_last_of('/') + 1);
 }
 
+KindLook lookOf(filetype::Kind kind)
+{
+    switch (kind) {
+    case filetype::Kind::Folder:
+        return {ui::Icon::Folder, ui::color::IconOrange};
+    case filetype::Kind::Cia:
+        return {ui::Icon::Package, ui::color::IconBlue};
+    case filetype::Kind::Ticket:
+        return {ui::Icon::Lock, ui::color::IconGrey};
+    case filetype::Kind::Homebrew:
+        return {ui::Icon::App, ui::color::IconTeal};
+    case filetype::Kind::Smdh:
+        return {ui::Icon::Picture, ui::color::IconTeal};
+    case filetype::Kind::CartridgeImage:
+    case filetype::Kind::Nds:
+        return {ui::Icon::GameCard, ui::color::IconRed};
+    case filetype::Kind::Firm:
+        return {ui::Icon::Chip, ui::color::IconGrey};
+    case filetype::Kind::Image:
+        return {ui::Icon::Picture, ui::color::IconPink};
+    case filetype::Kind::Text:
+        return {ui::Icon::Text, ui::color::IconGrey};
+    case filetype::Kind::Archive:
+        return {ui::Icon::Zip, ui::color::IconGold};
+    case filetype::Kind::Audio:
+        return {ui::Icon::Music, ui::color::IconPink};
+    case filetype::Kind::Video:
+        return {ui::Icon::Video, ui::color::IconPink};
+    case filetype::Kind::Other:
+        break;
+    }
+    return {ui::Icon::File, ui::color::IconGrey};
+}
+
 std::string plural(uint64_t count, const std::string &word)
 {
     return units::grouped(count) + " " + word + (count == 1 ? "" : "s");

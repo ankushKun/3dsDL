@@ -343,6 +343,7 @@ bool busy(const std::string &header, const std::string &title,
     BusyJob job;
     job.work = &work;
     const uint64_t started = osGetTime();
+    units::RateMeter meter;
     const auto logged = [&]() {
         const bool stopped = job.busy.cancel.load();
         logOutcome("task", !stopped, stopped,
@@ -396,6 +397,11 @@ bool busy(const std::string &header, const std::string &title,
                               ? units::bytes(done) + " of " + units::bytes(total)
                               : std::to_string(done) + " of " +
                                     std::to_string(total);
+            meter.sample(osGetTime(), done);
+            const int64_t left = meter.secondsLeft(total - done);
+            if (left >= 0 && done < total) {
+                view.left = units::timeLeft(static_cast<uint64_t>(left));
+            }
         } else if (job.busy.done.load() > 0) {
             // A running count, when the end is not known.
             const uint64_t done = job.busy.done.load();
@@ -432,6 +438,12 @@ net::Result download(const net::Request &request,
         {
             Guard guard(job.lock);
             view.name = job.filename.empty() ? host : job.filename;
+            if (!job.filename.empty() && !direct) {
+                const screens::KindLook look =
+                    screens::lookOf(filetype::fromName(job.filename));
+                view.nameIcon = look.icon;
+                view.nameIconColor = look.color;
+            }
             view.title = job.phase == net::Phase::Connecting ? "Connecting"
                        : job.phase == net::Phase::Restarting
                            ? "Starting Over"
@@ -464,7 +476,7 @@ net::Result download(const net::Request &request,
                     ? meter.secondsLeft(job.total - job.received)
                     : -1;
                 if (left >= 0) {
-                    view.speed += ", " + units::duration(left) + " left";
+                    view.left = units::timeLeft(static_cast<uint64_t>(left));
                 }
             } else if (job.phase == net::Phase::Downloading) {
                 view.speed = "Measuring speed...";
@@ -566,11 +578,11 @@ archives::Result extract(const std::string &path,
                 const int64_t left = work.secondsLeft(
                     totalWork > done ? totalWork - done : 0);
                 if (left >= 0) {
-                    view.speed = units::duration(left) + " left";
+                    view.left = units::timeLeft(static_cast<uint64_t>(left));
                 }
             }
             if (speed.hasRate()) {
-                view.tag = units::rate(speed.bytesPerSecond());
+                view.speed = units::rate(speed.bytesPerSecond());
             }
         } else {
             work.sample(now, progress.archiveBytes);
@@ -588,8 +600,11 @@ archives::Result extract(const std::string &path,
                         ? listing.archiveSize - progress.archiveBytes
                         : 0);
                 if (left >= 0) {
-                    view.speed = units::duration(left) + " left";
+                    view.left = units::timeLeft(static_cast<uint64_t>(left));
                 }
+            }
+            if (speed.hasRate()) {
+                view.speed = units::rate(speed.bytesPerSecond());
             }
         }
         view.message = "Extracting into " + folder;
@@ -642,7 +657,7 @@ installer::Result install(const std::string &path, uint64_t titleId,
                     ? meter.secondsLeft(job.total - job.done)
                     : -1;
                 if (left >= 0) {
-                    view.speed += ", " + units::duration(left) + " left";
+                    view.left = units::timeLeft(static_cast<uint64_t>(left));
                 }
             }
         }
@@ -700,16 +715,22 @@ fileops::Result fileOperation(
                 ? static_cast<float>(static_cast<double>(job.done) /
                                      static_cast<double>(expected))
                 : -1.0f;
+            meter.sample(osGetTime(), job.done);
             if (countsFiles) {
                 view.amounts = std::to_string(job.done) + " of " +
                                std::to_string(expected) + " files";
             } else {
                 view.amounts = units::bytes(job.done) + " of " +
                                units::bytes(expected);
-                meter.sample(osGetTime(), job.done);
                 if (meter.hasRate()) {
                     view.speed = units::rate(meter.bytesPerSecond());
                 }
+            }
+            const int64_t left = expected > job.done
+                ? meter.secondsLeft(expected - job.done)
+                : -1;
+            if (left >= 0) {
+                view.left = units::timeLeft(static_cast<uint64_t>(left));
             }
             view.source = job.current;
         }

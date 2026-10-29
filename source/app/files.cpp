@@ -35,6 +35,8 @@ using filetype::Kind;
 using screens::basename;
 using screens::ciaName;
 using screens::drawLabelledPanel;
+using screens::KindLook;
+using screens::lookOf;
 using screens::plural;
 using screens::readArchive;
 using screens::sortDescription;
@@ -226,45 +228,6 @@ Details loadDetails(const std::string &path, Kind kind,
         break;
     }
     return details;
-}
-
-struct KindLook {
-    ui::Icon icon;
-    u32 color;
-};
-
-KindLook lookOf(Kind kind)
-{
-    switch (kind) {
-    case Kind::Folder:
-        return {ui::Icon::Folder, ui::color::IconOrange};
-    case Kind::Cia:
-        return {ui::Icon::Package, ui::color::IconBlue};
-    case Kind::Ticket:
-        return {ui::Icon::Lock, ui::color::IconGrey};
-    case Kind::Homebrew:
-        return {ui::Icon::App, ui::color::IconTeal};
-    case Kind::Smdh:
-        return {ui::Icon::Picture, ui::color::IconTeal};
-    case Kind::CartridgeImage:
-    case Kind::Nds:
-        return {ui::Icon::GameCard, ui::color::IconRed};
-    case Kind::Firm:
-        return {ui::Icon::Chip, ui::color::IconGrey};
-    case Kind::Image:
-        return {ui::Icon::Picture, ui::color::IconPink};
-    case Kind::Text:
-        return {ui::Icon::Text, ui::color::IconGrey};
-    case Kind::Archive:
-        return {ui::Icon::Zip, ui::color::IconGold};
-    case Kind::Audio:
-        return {ui::Icon::Music, ui::color::IconPink};
-    case Kind::Video:
-        return {ui::Icon::Video, ui::color::IconPink};
-    case Kind::Other:
-        break;
-    }
-    return {ui::Icon::File, ui::color::IconGrey};
 }
 
 // The Files top screen: the title row, then a panel about the highlighted
@@ -909,14 +872,20 @@ void App::saveIndex()
     fileIndex_.markSaved();
 }
 
-void App::filesScreen()
+void App::filesScreen(const std::string &select)
 {
-    browseFiles();
+    browseFiles(select);
     saveIndex();
 }
 
-void App::browseFiles()
+void App::browseFiles(const std::string &select)
 {
+    std::string landOn; // name to put the cursor on once it has been read
+    if (!select.empty()) {
+        const size_t slash = select.rfind('/');
+        filesFolder_ = select.substr(0, slash + 1);
+        landOn = select.substr(slash + 1);
+    }
     if (filesFolder_.empty() || !fs::directoryExists(filesFolder_)) {
         filesFolder_ = fs::directoryExists(settings_.destination)
             ? naming::normaliseFolder(settings_.destination)
@@ -924,7 +893,6 @@ void App::browseFiles()
     }
     std::string &current = filesFolder_;
     int cursor = 0;
-    std::string landOn; // name to put the cursor on once it has been read
     std::vector<std::string> marked;
     std::map<std::string, Details> details;
 

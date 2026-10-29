@@ -163,3 +163,58 @@ TEST("remote: title icons as BMP pictures")
     CHECK_EQ(static_cast<unsigned char>(bmp[bottomRight + 1]), 0xFF);
     CHECK(remote::iconBmp(std::vector<uint16_t>(10)).empty());
 }
+
+TEST("remote: senders are named by their browsers")
+{
+    CHECK_EQ(remote::deviceName("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac "
+                                "OS X) AppleWebKit/605.1.15 Mobile/15E148"),
+             std::string("iPhone"));
+    CHECK_EQ(remote::deviceName("Mozilla/5.0 (Linux; Android 15; Pixel 9) "
+                                "AppleWebKit/537.36 Chrome/130.0 Mobile"),
+             std::string("Android"));
+    CHECK_EQ(remote::deviceName("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                                "AppleWebKit/605.1.15 Safari/605.1.15"),
+             std::string("Mac"));
+    CHECK_EQ(remote::deviceName("Mozilla/5.0 (Windows NT 10.0; Win64; x64)"),
+             std::string("Windows PC"));
+    CHECK_EQ(remote::deviceName("Mozilla/5.0 (X11; CrOS x86_64 14541.0.0)"),
+             std::string("Chromebook"));
+    CHECK_EQ(remote::deviceName("Mozilla/5.0 (X11; Linux x86_64; rv:131.0)"),
+             std::string("Linux PC"));
+    // The 3DS's own browser says it is like an iPhone.
+    CHECK_EQ(remote::deviceName("Mozilla/5.0 (New Nintendo 3DS like iPhone) "
+                                "AppleWebKit/536.30 NintendoBrowser/1.12"),
+             std::string("3DS"));
+    CHECK_EQ(remote::deviceName("curl/8.7.1"), std::string("curl"));
+    CHECK_EQ(remote::deviceName(""), std::string(""));
+    CHECK_EQ(remote::deviceName("python-requests/2.32"), std::string(""));
+}
+
+TEST("remote: where an upload stands in the page's batch")
+{
+    remote::HttpRequest request;
+    remote::UploadBatch batch;
+    CHECK(!remote::uploadBatch(request, batch));
+
+    request.headers["x-3dsdl-batch"] = "k3x9 2 5 100 6000000000";
+    CHECK(remote::uploadBatch(request, batch));
+    CHECK_EQ(batch.id, std::string("k3x9"));
+    CHECK_EQ(batch.position, static_cast<uint32_t>(2));
+    CHECK_EQ(batch.count, static_cast<uint32_t>(5));
+    CHECK_EQ(batch.before, static_cast<uint64_t>(100));
+    CHECK_EQ(batch.bytes, static_cast<uint64_t>(6000000000ULL));
+    CHECK(batch.folder.empty());
+
+    request.headers["x-3dsdl-batch"] = "k3x9 3 5 0 9 4 %2F3ds%2FCheck%20point";
+    CHECK(remote::uploadBatch(request, batch));
+    CHECK_EQ(batch.folder, std::string("/3ds/Check point"));
+    CHECK_EQ(batch.folderFiles, static_cast<uint32_t>(4));
+
+    // Anything that does not add up is ignored rather than half read.
+    for (const char *bad : {"k3x9 6 5 0 9", "k3x9 0 5 0 9", "k3x9 1 2", "K3X9 1 2 0 9",
+                            "a 1 x 0 9", "a 1 2 9 3", "a 1 2 0 x", "a 1 2 0 9 3 %2Fx",
+                            "a 1 2 0 9 1 x", "a 1 2 0 9 1", "", "a  1 2 0 9"}) {
+        request.headers["x-3dsdl-batch"] = bad;
+        CHECK(!remote::uploadBatch(request, batch));
+    }
+}

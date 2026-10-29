@@ -16,7 +16,9 @@ qrencode -t ansiutf8 "https://example.com/some-homebrew.3dsx"
 
 **Add to Queue** on the confirm screen saves a link for later. From the scanner the camera comes straight back, so a page of codes goes quickly. **Queue** on the home screen downloads them all with **Download All**, keeping both files on a name clash and asking about CIAs once.
 
-**Receive** listens for links and files while it's open. Scan its QR code with a phone on the same Wi-Fi, or type the address it shows. Most computers and iPhones can also open `http://3ds.local/` (`3ds-2.local` if another console already uses the name); some Android phones can't, which is why the QR code uses the IP address. Paste links into the page and press **Send to 3DS**. FBI's `servefiles.py`, `sendurls.py` and Boop send to port 5000 as they did with FBI.
+**Receive** listens for links and files while it's open. Scan its QR code with a phone on the same Wi-Fi, or type the address it shows into a browser. Most computers and iPhones can also open `http://3ds.local/` (`3ds-2.local` if another console already uses the name); some Android phones can't, which is why the QR code uses the address. Paste links into the page and press **Send to 3DS**. FBI's `servefiles.py`, `sendurls.py` and Boop take the same address, as they did with FBI. CIAs they send install without a copy being kept, or download instead if you choose.
+
+Everything that comes in or goes out stays listed on the touch screen until 3dsDL closes, newest first: each file, each folder dropped on the page as one row, and each link, with how it went. Open a row to see where it was saved and who sent it, to install a CIA, or to show it in Files.
 
 The page's **Files** tab is a file manager for the SD card, with no FTP app needed. The first time a device opens it, the console asks whether to allow that device, and the answer lasts until you leave Receive. From the page you can:
 
@@ -27,7 +29,7 @@ The page's **Files** tab is a file manager for the SD card, with no FTP app need
 
 The page follows the console: a status at the top says when it is waiting for you to choose on the 3DS, installing or downloading, and how that ended. Tap a file for its details, with the real icon, title, title ID and version for CIAs and homebrew. Uploads sit at the top of the list, with each file shown as soon as it arrives. There is a filter, hidden files, select all, a picture viewer, keyboard shortcuts on a computer, and a warning before you change `boot.firm`, `luma` or `Nintendo 3DS`.
 
-One transfer runs at a time, and the console shows it on the touch screen. While the page is sending, reading or comparing files the console stays out of Sleep Mode, also with the lid closed and between the files of a batch, and sleeps half a minute after the last request. Uploads go to a hidden `.3dsdl-upload.part` file and only take their real name once every byte has arrived. From a computer, `curl` works too:
+One transfer runs at a time, and the console shows it on the top screen. While the page is sending, reading or comparing files the console stays out of Sleep Mode, also with the lid closed and between the files of a batch, and sleeps half a minute after the last request. Uploads go to a hidden `.3dsdl-upload.part` file and only take their real name once every byte has arrived. From a computer, `curl` works too:
 
 ```sh
 curl -T game.cia -H 'X-Requested-With: 3dsDL' 'http://192.168.1.20/api/file?path=/cia/game.cia'
