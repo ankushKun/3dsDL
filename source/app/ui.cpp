@@ -1569,8 +1569,26 @@ void drawMarquee(const std::string &value, float x, float y, float scale,
                                                 : x;
     const float offset = marqueeOffset(marqueeKey(value, left, y),
                                        width - maxWidth);
+    // Only the glyphs in view are drawn: citro2d's C2D_DrawText never checks
+    // its vertex buffer, and a line of thousands overruns it and hangs the GPU.
+    size_t from = 0;
+    size_t to = 0;
+    float start = 0.0f; // where the first drawn glyph starts in the line
+    float at = 0.0f;
+    for (const Glyph &glyph : glyphs(value, scale)) {
+        if (at >= offset + maxWidth) {
+            break;
+        }
+        if (at + glyph.width <= offset) {
+            from = glyph.offset + glyph.length;
+            start = at + glyph.width;
+        }
+        to = glyph.offset + glyph.length;
+        at += glyph.width;
+    }
     clip({left, y - 2, maxWidth, lineHeight(scale) + 6});
-    drawText(value, left - offset, y, scale, textColor, flags & ~C2D_AlignMask);
+    drawText(value.substr(from, to - from), left - offset + start, y, scale,
+             textColor, flags & ~C2D_AlignMask);
     unclip();
 }
 

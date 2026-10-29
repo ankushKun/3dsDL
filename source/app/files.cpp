@@ -3166,6 +3166,14 @@ void App::textEditor(const std::string &path)
 
     constexpr float LinePitch = 16;
     constexpr float EditorScale = 0.38f;
+    // Lines are drawn up to this many bytes, so a huge one does not slow
+    // every frame; the keyboard takes 1900 at most anyway.
+    constexpr size_t ShownBytes = 2048;
+    const auto shown = [](const std::string &line) {
+        return line.size() <= ShownBytes
+                   ? line
+                   : text::truncateUtf8(line, ShownBytes) + "...";
+    };
     const ui::Rect paper = {10, 50, 380, 184};
     const float viewport = paper.h - 4;
     int cursor = 0;
@@ -3349,7 +3357,7 @@ void App::textEditor(const std::string &path)
                           0, ui::color::rgb(0xE8E1BE));
             ui::drawText(std::to_string(index + 1), paper.x + 26, y + 2,
                          0.3f, ui::color::rgb(0xA79D70), C2D_AlignRight);
-            const std::string &line = document.lines[index];
+            const std::string line = shown(document.lines[index]);
             // The current line scrolls to show all of it; the rest are cut.
             if (index == cursor && !scroller.dragging()) {
                 ui::drawMarquee(line, paper.x + 36, y, EditorScale,
@@ -3382,7 +3390,7 @@ void App::textEditor(const std::string &path)
                          std::to_string(count),
                      recess.x + 10, recess.y + 5, ui::type::Tiny,
                      ui::color::InkSoft);
-        const std::string &current = document.lines[cursor];
+        const std::string current = shown(document.lines[cursor]);
         ui::drawWrapped(current.empty() ? "(empty line)" : current,
                         recess.x + 10, recess.y + 24, ui::type::Small,
                         current.empty() ? ui::color::InkSoft
