@@ -358,6 +358,11 @@ void loadExtData(Snapshot &out)
             reinterpret_cast<u8 *>(ids.data())))) {
         return;
     }
+    // Never read past the buffer that was handed to the service, whatever
+    // count it reports; entries beyond the cap are left for the next load.
+    if (count > MaxExtData) {
+        count = MaxExtData;
+    }
     std::unique_ptr<uint8_t[]> data(new uint8_t[SmdhSize]);
     for (u32 index = 0; index < count; ++index) {
         if (ids[index] == 0) {
@@ -390,6 +395,12 @@ void loadPending(FS_MediaType media, Snapshot &out)
     u32 read = 0;
     if (R_FAILED(AM_GetPendingTitleList(&read, ids.data(), count, media))) {
         return;
+    }
+    // The list can grow between the count and the list calls, so never
+    // read past the buffer that was sized from the count; the rest are
+    // picked up by the next load.
+    if (read > count) {
+        read = count;
     }
     for (u32 index = 0; index < read; ++index) {
         if (titles::isShown(ids[index])) {
