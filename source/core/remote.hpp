@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -102,6 +103,45 @@ bool apiRequestAllowed(const HttpRequest &request, std::string &why);
 // and the like cannot leave root.
 bool localPath(const std::string &root, const std::string &webPath,
                std::string &out);
+
+// What a link sender may ask for besides the links: folder=/3ds/app (a page
+// path, as the file API takes) saves there instead of the Download Folder,
+// and replace=1, with a folder, asks whether a link the queue kept beside a
+// file of the same name should replace it. Any site can open /send, so a
+// sender can name only the folders in sendFolderAllowed, and nothing is
+// replaced without a choice on the console. False, with why, for any other
+// folder.
+struct SendOptions {
+    std::string folder; // "sdmc:/3ds/app/", or "" for the Download Folder
+    bool replace = false;
+};
+bool sendOptions(const std::string &form, SendOptions &out, std::string &why);
+
+// Folders a sender may name ("sdmc:/3ds/app"): /3ds/ and /cias/ and what
+// is in them, except 3dsDL's own folder. Never the root, /luma/ or anything
+// else the system or Luma3DS loads from. Every part must be a plain ASCII
+// name: no "." or "..", and no "~1", which on FAT can be another folder's
+// short name.
+bool sendFolderAllowed(const std::string &path);
+
+// Whether a sender's file may have this name: plain ASCII, never 3dsDL.3dsx
+// or boot.3dsx, the Homebrew Launcher's own name, and never a name like
+// "APP~1.CIA", which on FAT can be another file's short name.
+bool sentNameAllowed(const std::string &filename);
+
+// Whether a file a sender's link saved may replace one of the same name:
+// only a .3dsx or a .cia, which is what an update is, never another app's
+// settings or data.
+bool sentMayReplace(const std::string &filename);
+
+// The older file to ask about replacing, for a file a sender's link saved
+// at path under the server's filename, in the folder the sender named: one
+// of that name the queue kept it beside (finalize::keptBeside), when
+// sentMayReplace allows it and it is not in saved, the lower-case paths
+// this same send wrote. "" when there is nothing to ask about.
+std::string replaceCandidate(const std::string &path, const std::string &filename,
+                             const std::string &folder,
+                             const std::set<std::string> &saved);
 
 // The Content-Type to send a file as. Pages and scripts are sent as plain
 // text, so a file opened from the SD card can never run in the page.

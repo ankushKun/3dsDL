@@ -25,6 +25,8 @@ struct Received {
     // FBI's tools wait on this connection for one byte, sent by
     // finishReceived once the links are done. -1 for the web page.
     int replySocket = -1;
+    // What a sender to /send asked for besides the links.
+    remote::SendOptions options;
 };
 
 // Tells an FBI tool the links are done, so it can stop serving its files,

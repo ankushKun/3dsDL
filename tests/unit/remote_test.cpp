@@ -99,6 +99,76 @@ TEST("remote: paths from the page stay on the SD card")
     }
 }
 
+TEST("remote: a sender can name a folder for apps or CIAs, and ask to replace")
+{
+    remote::SendOptions options;
+    std::string why;
+    CHECK(remote::sendOptions("links=https%3A%2F%2Fa.b%2Fc.3dsx", options, why));
+    CHECK_EQ(options.folder, std::string(""));
+    CHECK(!options.replace);
+    // An empty folder is the same as none.
+    CHECK(remote::sendOptions("folder=&links=x", options, why));
+    CHECK_EQ(options.folder, std::string(""));
+
+    CHECK(remote::sendOptions("links=x&folder=%2F3ds%2F&replace=1", options, why));
+    CHECK_EQ(options.folder, std::string("sdmc:/3ds/"));
+    CHECK(options.replace);
+    CHECK(remote::sendOptions("folder=%2F3DS%2FChecker+Board", options, why));
+    CHECK_EQ(options.folder, std::string("sdmc:/3DS/Checker Board/"));
+    CHECK(remote::sendOptions("folder=%2Fcias", options, why));
+    CHECK_EQ(options.folder, std::string("sdmc:/cias/"));
+    // Only "1" turns it on.
+    CHECK(remote::sendOptions("replace=yes", options, why));
+    CHECK(!options.replace);
+
+    for (const char *bad :
+         {"folder=%2F", "folder=3ds", "folder=sdmc%3A%2F3ds", "folder=%2F..%2F",
+          "folder=%2F3ds%2F..%2Fluma", "folder=%2F3ds%2Fa%5Cb",
+          "folder=%2F3ds%2F.%2F3dsDL", "folder=%2F3ds%2F3dsDL.",
+          "folder=%2F3ds%2F3dsDL%20", "folder=%2F3ds%2F+3dsDL",
+          "folder=%2F3ds%2Fa%00b", "folder=%2Fluma%2Fplugins",
+          "folder=%2Fluma%2Fpayloads", "folder=%2FNintendo+3DS",
+          "folder=%2F3dsx", "folder=%2F3ds%2F3dsDL", "folder=%2F3DS%2F3DSDL%2Fx",
+          "folder=%2F3ds%2F3DSDL~1", "folder=%2F3ds%2F3d%C5%BFDL",
+          "folder=%2Fciasx"}) {
+        why.clear();
+        CHECK(!remote::sendOptions(std::string("links=x&replace=1&") + bad,
+                                   options, why));
+        CHECK(!why.empty());
+        CHECK_EQ(options.folder, std::string(""));
+        CHECK(!options.replace);
+    }
+
+    CHECK(remote::sendFolderAllowed("sdmc:/3ds"));
+    CHECK(remote::sendFolderAllowed("sdmc:/3ds/3dsDLx/"));
+    CHECK(remote::sendFolderAllowed("sdmc:/cias/a~b"));
+    CHECK(remote::sendFolderAllowed("sdmc:/cias/Games/"));
+    for (const char *never : {"", "sdmc:/", "sdmc:/3ds/../luma", "sdmc:/3ds/./x",
+                              "sdmc:/3ds//x", "sdmc:/cias/A~1"}) {
+        CHECK(!remote::sendFolderAllowed(never));
+    }
+}
+
+TEST("remote: names a sender's file may have, and what it may replace")
+{
+    CHECK(remote::sentNameAllowed("2048-port-3ds.3dsx"));
+    CHECK(remote::sentNameAllowed("Checkpoint.cia"));
+    CHECK(remote::sentNameAllowed("app~beta.3dsx"));
+    CHECK(remote::sentNameAllowed("config.json"));
+    for (const char *never : {"boot.3dsx", "Boot.3DSX", "3dsDL.3dsx",
+                              "APP~1.CIA", "CHECKP~1.3DS", "A~B~C~1.TXT",
+                              "3d\xc5\xbf" "DL.3dsx", ""}) {
+        CHECK(!remote::sentNameAllowed(never));
+    }
+
+    CHECK(remote::sentMayReplace("2048-port-3ds.3dsx"));
+    CHECK(remote::sentMayReplace("Checkpoint.CIA"));
+    for (const char *never : {"config.json", "x.unistore", "App.smdh",
+                              "3dsDL.3dsx", "boot.3dsx", "x.firm"}) {
+        CHECK(!remote::sentMayReplace(never));
+    }
+}
+
 TEST("remote: the file API only answers its own page")
 {
     remote::HttpRequest request;

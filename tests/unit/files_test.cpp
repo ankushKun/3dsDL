@@ -3,6 +3,8 @@
 
 #include "finalize.hpp"
 #include "fs_util.hpp"
+#include "remote.hpp"
+#include "text.hpp"
 
 #include <sys/stat.h>
 
@@ -64,6 +66,59 @@ TEST("finalize: new file, rename on conflict and overwrite")
     CHECK_EQ(readText(temp.path() + "f.zip"), std::string("three"));
     CHECK(!fs::fileExists(temp.path() + "f.zip.3dsdl-backup"));
     CHECK(!fs::fileExists(part));
+}
+
+TEST("finalize: a download kept beside an older copy can replace it later")
+{
+    TempDir temp;
+    CHECK(writeText(temp.path() + "f.3dsx", "old"));
+    CHECK(writeText(temp.path() + "f (1).3dsx", "new"));
+    CHECK_EQ(finalize::keptBeside(temp.path() + "f (1).3dsx", "f.3dsx"),
+             temp.path() + "f.3dsx");
+    // No clash, or nothing there any more: nothing to ask about.
+    CHECK_EQ(finalize::keptBeside(temp.path() + "f.3dsx", "f.3dsx"),
+             std::string(""));
+    CHECK_EQ(finalize::keptBeside(temp.path() + "g (1).3dsx", "g.3dsx"),
+             std::string(""));
+    CHECK_EQ(finalize::keptBeside(temp.path() + "f (1).3dsx", ""),
+             std::string(""));
+    // FAT ignores case, and so does the test folder.
+    CHECK_EQ(finalize::keptBeside(temp.path() + "f (1).3dsx", "F.3DSX"),
+             temp.path() + "F.3DSX");
+
+    // What a sender's replace=1 may ask about.
+    const std::string at = temp.path();
+    CHECK(writeText(at + "config.json", "old"));
+    CHECK(writeText(at + "config (1).json", "new"));
+    CHECK_EQ(remote::replaceCandidate(at + "f (1).3dsx", "f.3dsx", at, {}),
+             at + "f.3dsx");
+    // Not in the folder the sender named, not an app, no clash, or a file
+    // this same send saved.
+    CHECK_EQ(remote::replaceCandidate(at + "f (1).3dsx", "f.3dsx", at + "x/", {}),
+             std::string(""));
+    CHECK_EQ(remote::replaceCandidate(at + "config (1).json", "config.json", at,
+                                      {}),
+             std::string(""));
+    CHECK_EQ(remote::replaceCandidate(at + "f.3dsx", "f.3dsx", at, {}),
+             std::string(""));
+    CHECK_EQ(remote::replaceCandidate(at + "f (1).3dsx", "f.3dsx", at,
+                                      {text::lower(at + "F.3DSX")}),
+             std::string(""));
+
+    CHECK(finalize::replace(temp.path() + "f (1).3dsx", temp.path() + "f.3dsx"));
+    CHECK_EQ(readText(temp.path() + "f.3dsx"), std::string("new"));
+    CHECK(!fs::fileExists(temp.path() + "f (1).3dsx"));
+    CHECK(!fs::fileExists(temp.path() + "f.3dsx.3dsdl-backup"));
+
+    // Nothing to move: the old file stays.
+    CHECK(!finalize::replace(temp.path() + "gone.3dsx", temp.path() + "f.3dsx"));
+    CHECK_EQ(readText(temp.path() + "f.3dsx"), std::string("new"));
+
+    // No older file any more: a plain move.
+    CHECK(writeText(temp.path() + "g (1).3dsx", "only"));
+    CHECK(finalize::replace(temp.path() + "g (1).3dsx", temp.path() + "g.3dsx"));
+    CHECK_EQ(readText(temp.path() + "g.3dsx"), std::string("only"));
+    CHECK(!fs::fileExists(temp.path() + "g (1).3dsx"));
 }
 
 TEST("finalize: a rejected name falls back instead of losing the data")

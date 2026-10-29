@@ -202,6 +202,10 @@ private:
         std::string path;    // where it was saved, when it was
         uint64_t bytes = 0;
         std::string message; // why it failed
+        // The name the server gave it (name is what it was saved as, which
+        // differs after a clash), and its host after redirects.
+        std::string filename;
+        std::string host;
     };
     // Downloads the queued links in order, or only those in ids when given,
     // without stopping to ask. Finished ones leave the queue. With results,

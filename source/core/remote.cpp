@@ -1,6 +1,8 @@
 #include "remote.hpp"
 
 #include "file_ops.hpp"
+#include "finalize.hpp"
+#include "naming.hpp"
 #include "text.hpp"
 #include "url.hpp"
 
@@ -78,6 +80,21 @@ const char *statusText(int status)
     default:
         return "Error";
     }
+}
+
+// A name a sender may not use: "~" and a digit anywhere, which on FAT can
+// be another file's or folder's short name (BOOT~1.FIR for boot.firm), or
+// anything past ASCII, whose case FAT may fold in ways text::lower does not.
+bool unsafeSentName(const std::string &name)
+{
+    for (size_t at = 0; at < name.size(); ++at) {
+        const unsigned char c = static_cast<unsigned char>(name[at]);
+        if (c >= 0x80 || (c == '~' && at + 1 < name.size() &&
+                          std::isdigit(static_cast<unsigned char>(name[at + 1])))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -402,6 +419,70 @@ bool localPath(const std::string &root, const std::string &webPath,
     }
     out = path == root ? root + "/" : path;
     return true;
+}
+
+bool sendOptions(const std::string &form, SendOptions &out, std::string &why)
+{
+    out = SendOptions();
+    const std::string folder = formValue(form, "folder");
+    if (!folder.empty()) {
+        std::string path;
+        if (!localPath("sdmc:", folder, path) || !sendFolderAllowed(path)) {
+            why = "Links can only be saved in /3ds/ or /cias/.";
+            return false;
+        }
+        out.folder = path.back() == '/' ? path : path + "/";
+    }
+    out.replace = formValue(form, "replace") == "1";
+    return true;
+}
+
+bool sendFolderAllowed(const std::string &path)
+{
+    const std::string card = "sdmc:/";
+    const std::string folder =
+        text::lower(path) + (!path.empty() && path.back() == '/' ? "" : "/");
+    const auto under = [&](const std::string &top) {
+        return folder.compare(0, top.size(), top) == 0;
+    };
+    if (!(under("sdmc:/3ds/") && !under("sdmc:/3ds/3dsdl/")) &&
+        !under("sdmc:/cias/")) {
+        return false;
+    }
+    for (size_t start = card.size(); start < folder.size();) {
+        const size_t end = folder.find('/', start);
+        const std::string part = folder.substr(start, end - start);
+        if (part.empty() || part == "." || part == ".." || unsafeSentName(part)) {
+            return false;
+        }
+        start = end + 1;
+    }
+    return true;
+}
+
+bool sentNameAllowed(const std::string &filename)
+{
+    const std::string name = text::lower(filename);
+    return !name.empty() && !unsafeSentName(name) && name != "boot.3dsx" &&
+           name != "3dsdl.3dsx";
+}
+
+bool sentMayReplace(const std::string &filename)
+{
+    return sentNameAllowed(filename) &&
+           (text::endsWithNoCase(filename, ".3dsx") ||
+            text::endsWithNoCase(filename, ".cia"));
+}
+
+std::string replaceCandidate(const std::string &path, const std::string &filename,
+                             const std::string &folder,
+                             const std::set<std::string> &saved)
+{
+    if (naming::parentFolder(path) != folder || !sentMayReplace(filename)) {
+        return "";
+    }
+    const std::string older = finalize::keptBeside(path, filename);
+    return older.empty() || saved.count(text::lower(older)) > 0 ? "" : older;
 }
 
 const char *mimeType(const std::string &name)

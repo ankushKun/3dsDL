@@ -602,9 +602,12 @@ void App::runQueue(const std::vector<uint64_t> *ids,
     const auto report = [results](const std::string &url, HistoryStatus status,
                                   const std::string &name,
                                   const std::string &path, uint64_t bytes,
-                                  const std::string &message) {
+                                  const std::string &message,
+                                  const std::string &filename = "",
+                                  const std::string &host = "") {
         if (results != nullptr) {
-            results->push_back({url, status, name, path, bytes, message});
+            results->push_back(
+                {url, status, name, path, bytes, message, filename, host});
         }
     };
     std::vector<uint64_t> order;
@@ -709,7 +712,9 @@ void App::runQueue(const std::vector<uint64_t> *ids,
         record(entry);
         report(item.url, placed.ok ? HistoryStatus::Saved : HistoryStatus::Failed,
                placed.ok ? basename(placed.path) : result.filename, placed.path,
-               result.bytes, placed.ok ? "" : placed.message);
+               result.bytes, placed.ok ? "" : placed.message, result.filename,
+               url::host(result.effectiveUrl.empty() ? item.url
+                                                     : result.effectiveUrl));
         if (!placed.ok) {
             found->state = QueuedLink::State::Failed;
             found->message = placed.message;
@@ -1107,11 +1112,57 @@ void App::receiveScreen()
                    done == count);
     };
 
+    // A link the queue kept beside a file of the same name, in the folder
+    // its sender named: now that the server's name for it is known, the
+    // console says whether it replaces older. True when it did.
+    const auto askToReplace = [&](QueueResult &result, const std::string &older,
+                                  const std::vector<ui::Fact> &from) {
+        const std::vector<Named> named = {{result.filename, result.host}};
+        std::vector<ui::Fact> facts = from;
+        facts.push_back({"Already in", naming::parentFolder(older)});
+        facts.push_back({"Kept as", basename(result.path)});
+        ui::Dialog dialog;
+        dialog.header = "Receive";
+        dialog.title = "A file with this name already exists.";
+        dialog.tone = ui::Tone::Warning;
+        dialog.buttons = {"Keep Both", "Replace"};
+        dialog.dangerous = 1;
+        dialog.cancelButton = 0;
+        dialog.drawTop = [&]() { drawHandedOver(named, facts); };
+        job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
+        if (ui::choose(dialog) != 1) {
+            return false;
+        }
+        checkSdIndex(); // so only this change counts as explained
+        const bool replaced = finalize::replace(result.path, older);
+        fileIndex_.changed(result.path);
+        sdChanged(older);
+        if (!replaced) {
+            logging::warn("replace.failed", {{"file", result.filename}});
+            ui::message("Could Not Replace", "The new one is " + result.path + ".",
+                        ui::Tone::Error);
+            return false;
+        }
+        logging::info("replace.done", {{"file", result.filename}});
+        for (HistoryEntry &entry : history_) {
+            if (entry.path == result.path) {
+                entry.path = older;
+            }
+        }
+        storage::saveHistory(history_);
+        result.path = older;
+        result.name = basename(older);
+        return true;
+    };
+
     // What a sender handed over: CIAs on the SD card to install, or links.
     const auto handle = [&](net::Received &received) {
-        logging::info("receive.got", {{"links", received.links.size()},
-                                      {"cias", received.install.size()},
-                                      {"fbi", received.replySocket >= 0}});
+        logging::info("receive.got",
+                      {{"links", received.links.size()},
+                       {"cias", received.install.size()},
+                       {"fbi", received.replySocket >= 0},
+                       {"folder", received.options.folder},
+                       {"replace", received.options.replace ? "yes" : ""}});
         const std::string who = whoIs(received.device, received.from);
         const std::vector<ui::Fact> from = {
             {"From", senderOf(received.device, received.from)}};
@@ -1158,9 +1209,12 @@ void App::receiveScreen()
         for (const std::string &link : received.links) {
             names.push_back({nameOf(link), url::host(link)});
         }
+        const remote::SendOptions &options = received.options;
+        const std::string folder =
+            options.folder.empty() ? settings_.destination : options.folder;
         std::vector<ui::Fact> facts = from;
         if (!offerInstall) {
-            facts.push_back({"Save to", settings_.destination});
+            facts.push_back({"Save to", folder});
         }
         ui::Dialog dialog;
         dialog.header = "Receive";
@@ -1207,12 +1261,15 @@ void App::receiveScreen()
                        done == count, true);
         } else if (choice == Choice::Download) {
             const uint64_t first = nextQueueId_;
-            addToQueue(received.links, settings_.destination, false);
+            addToQueue(received.links, folder, false);
             std::vector<uint64_t> ids;
             for (const QueuedLink &item : queue_) {
+                // When the sender named a folder, the same link queued for
+                // another folder stays in the Queue.
                 if (item.id >= first ||
-                    std::find(received.links.begin(), received.links.end(),
-                              item.url) != received.links.end()) {
+                    ((options.folder.empty() || item.folder == folder) &&
+                     std::find(received.links.begin(), received.links.end(),
+                               item.url) != received.links.end())) {
                     ids.push_back(item.id);
                 }
             }
@@ -1220,6 +1277,37 @@ void App::receiveScreen()
             job.setState("downloading", "Downloading " + links + ".", true);
             std::vector<QueueResult> results;
             runQueue(&ids, &results);
+            // Questions come once the downloads are done, as the queue never
+            // stops to ask in between, and not at all after a stop.
+            const bool stopped = std::any_of(
+                results.begin(), results.end(), [](const QueueResult &result) {
+                    return result.status == HistoryStatus::Cancelled;
+                });
+            if (options.replace && !options.folder.empty() && !stopped) {
+                // Never "older" than a file this same send saved, in any
+                // case, as FAT ignores it.
+                std::set<std::string> saved;
+                for (const QueueResult &result : results) {
+                    saved.insert(text::lower(result.path));
+                }
+                for (QueueResult &result : results) {
+                    if (!ui::keepRunning()) {
+                        break;
+                    }
+                    const bool kept =
+                        result.status == HistoryStatus::Saved ||
+                        (result.status == HistoryStatus::Installed &&
+                         fs::fileExists(result.path));
+                    const std::string older =
+                        kept ? remote::replaceCandidate(result.path,
+                                                        result.filename, folder,
+                                                        saved)
+                             : "";
+                    if (!older.empty() && askToReplace(result, older, from)) {
+                        saved.insert(text::lower(older));
+                    }
+                }
+            }
             for (const QueueResult &result : results) {
                 receiveLog_.linkEnded(result.url, rowState(result.status),
                                       result.name, result.path, result.bytes,
@@ -1231,7 +1319,9 @@ void App::receiveScreen()
             linksIn += static_cast<uint32_t>(count);
             job.finish("Done with " + links + " on the 3DS.", true, true);
         } else if (choice == Choice::Queue) {
-            addToQueue(received.links, settings_.destination, false);
+            // The Queue keeps only the folder: Download All keeps both on a
+            // clash, as it always has.
+            addToQueue(received.links, folder, false);
             receiveLog_.addLinks(received, RowState::Queued, clockNow());
             linksIn += static_cast<uint32_t>(count);
             job.finish("Added " + links + " to the Queue on the 3DS.", true, true);
