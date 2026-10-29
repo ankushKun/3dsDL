@@ -625,7 +625,12 @@ void App::titleOptions(titles::Title title)
         if (!deleted) {
             ui::message("Not Deleted", error, ui::Tone::Error);
         }
-        startLibrary();
+        if (deleted && library_.complete) {
+            library::forgetTitle(library_, title, withTicket);
+            ++libraryGeneration_;
+        } else {
+            startLibrary();
+        }
         return;
     }
     }

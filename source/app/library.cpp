@@ -625,6 +625,27 @@ bool deleteTitle(const titles::Title &title, bool withTicket, std::string &error
     return true;
 }
 
+void forgetTitle(Snapshot &snapshot, const titles::Title &title,
+                 bool withTicket)
+{
+    snapshot.titles.erase(
+        std::remove_if(snapshot.titles.begin(), snapshot.titles.end(),
+                       [&](const titles::Title &each) {
+                           return each.id == title.id &&
+                                  each.place == title.place;
+                       }),
+        snapshot.titles.end());
+    if (withTicket) {
+        snapshot.tickets.erase(std::remove(snapshot.tickets.begin(),
+                                           snapshot.tickets.end(), title.id),
+                               snapshot.tickets.end());
+    }
+    // AM removes its folder along with it.
+    if (title.place == titles::Place::SdCard) {
+        snapshot.onSdCard.erase(title.id);
+    }
+}
+
 std::vector<uint64_t> unusedTickets(const Snapshot &snapshot)
 {
     if (!snapshot.complete || !snapshot.sdListed) {

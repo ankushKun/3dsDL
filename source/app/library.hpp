@@ -116,6 +116,10 @@ bool titleSmdh(uint64_t titleId, FS_MediaType media, smdh::Info &info);
 
 bool deleteTitle(const titles::Title &title, bool withTicket,
                  std::string &error);
+// Takes a deleted title out of a complete snapshot, so the lists keep their
+// place instead of reading everything again.
+void forgetTitle(Snapshot &snapshot, const titles::Title &title,
+                 bool withTicket);
 // True when AM describes titleId as installed on the SD card or in system
 // memory, asked for that one title.
 bool installedAnywhere(uint64_t titleId);
