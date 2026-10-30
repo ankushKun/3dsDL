@@ -4,6 +4,7 @@
 #include "awake.hpp"
 #include "cia.hpp"
 #include "crash.hpp"
+#include "fetch.hpp"
 #include "file_ops.hpp"
 #include "finalize.hpp"
 #include "fs_util.hpp"
@@ -34,6 +35,7 @@
 #include <initializer_list>
 #include <memory>
 #include <optional>
+#include <map>
 #include <set>
 
 // The download queue, receiving links and files from other devices on the
@@ -99,6 +101,11 @@ struct ReceiveJob {
     std::deque<Asker> asking;
     std::set<std::string> allowed;
     std::set<std::string> denied;
+    // Devices whose links Don't Allow turned away, a list of their own.
+    std::set<std::string> linksDenied;
+    // The console's own address: it never sends itself links or asks
+    // itself for files, which a link pointing back at it would.
+    std::string self;
     // Progress reports and the paths the page changed, in order, until the
     // screen takes them.
     std::deque<net::Transfer> reports;
@@ -139,13 +146,52 @@ struct ReceiveJob {
     {
         LightLock_Lock(&lock);
         (allow ? allowed : denied).insert(from);
+        (allow ? denied : allowed).erase(from);
         LightLock_Unlock(&lock);
+    }
+
+    bool fromConsole(const std::string &from) const
+    {
+        return from == self || from.rfind("127.", 0) == 0;
+    }
+
+    // Runs on the listener's thread.
+    bool refusesLinks(const std::string &from)
+    {
+        LightLock_Lock(&lock);
+        const bool refused = fromConsole(from) || linksDenied.count(from) != 0;
+        LightLock_Unlock(&lock);
+        return refused;
+    }
+
+    // Turns a device's links away until Receive closes, those already
+    // waiting included.
+    void denyLinks(const std::string &from)
+    {
+        std::deque<net::Received> dropped;
+        LightLock_Lock(&lock);
+        linksDenied.insert(from);
+        for (auto at = arrived.begin(); at != arrived.end();) {
+            if (at->from == from && !at->links.empty() && at->replySocket < 0) {
+                dropped.push_back(*at);
+                at = arrived.erase(at);
+            } else {
+                ++at;
+            }
+        }
+        LightLock_Unlock(&lock);
+        for (net::Received &received : dropped) {
+            net::finishReceived(received);
+        }
     }
 
     // Runs on the listener's thread.
     net::Access access(const std::string &from, const std::string &device,
                        bool ask)
     {
+        if (fromConsole(from)) {
+            return net::Access::Denied;
+        }
         LightLock_Lock(&lock);
         net::Access result = net::Access::Pending;
         const bool waiting =
@@ -566,8 +612,115 @@ void drawHandedOver(const std::vector<Named> &names,
 
 } // namespace
 
+bool App::replaceSent(const std::string &newer, const std::string &older,
+                      const std::string &host, const std::string &sender)
+{
+    std::string app;
+    if (!remote::sameApp(older, newer, &app)) {
+        logging::info("replace.skipped", {{"file", basename(older)}});
+        return false;
+    }
+    const std::vector<Named> named = {{basename(older), host}};
+    const std::vector<ui::Fact> facts = {{"From", sender},
+                                         {"App", app},
+                                         {"Already in", naming::parentFolder(older)},
+                                         {"Kept as", basename(newer)}};
+    ui::Dialog dialog;
+    dialog.header = "Receive";
+    dialog.title = "A file with this name already exists.";
+    dialog.tone = ui::Tone::Warning;
+    dialog.buttons = {"Keep Both", "Replace"};
+    dialog.dangerous = 1;
+    dialog.cancelButton = 0;
+    dialog.drawTop = [&]() { drawHandedOver(named, facts); };
+    if (ui::choose(dialog) != 1) {
+        return false;
+    }
+    checkSdIndex(); // so only this change counts as explained
+    const bool replaced = finalize::replace(newer, older);
+    fileIndex_.changed(newer);
+    sdChanged(older);
+    if (!replaced) {
+        logging::warn("replace.failed", {{"file", basename(older)}});
+        ui::message("Could Not Replace", "The new one is " + newer + ".",
+                    ui::Tone::Error);
+        return false;
+    }
+    logging::info("replace.done", {{"file", basename(older)}});
+    return true;
+}
+
+App::SameApp App::sentFolderHoldsSameApp(const std::string &archive,
+                                         const SentExtraction &sent,
+                                         const archives::Listing &shown)
+{
+    const std::string folder = std::string(remote::ArchiveTarget) + shown.top + "/";
+    if (!shown.topIsFolder || !fs::directoryExists(folder) ||
+        fs::listEntries(folder, nullptr, true, false).empty()) {
+        return SameApp::Yes;
+    }
+    // The apps the folder holds, in it or one folder down.
+    std::vector<std::string> theirs;
+    for (const fs::Entry &entry : fs::listEntries(folder, nullptr, true, false)) {
+        if (!entry.folder && filetype::fromName(entry.name) == filetype::Kind::Homebrew) {
+            theirs.push_back(folder + entry.name);
+        } else if (entry.folder) {
+            for (const fs::Entry &inner :
+                 fs::listEntries(folder + entry.name + "/", nullptr, true, false)) {
+                if (!inner.folder &&
+                    filetype::fromName(inner.name) == filetype::Kind::Homebrew) {
+                    theirs.push_back(folder + entry.name + "/" + inner.name);
+                }
+            }
+        }
+    }
+    if (theirs.empty()) {
+        return SameApp::No;
+    }
+    // Each 3dsx in the archive is taken out on its own to compare, as its
+    // listing says nothing about what it is; a few are enough.
+    const std::string scratch = std::string(storage::DataFolder) + "check/";
+    size_t tried = 0;
+    for (const archives::Entry &entry : sent.listing.entries) {
+        if (entry.directory || entry.path.empty() || tried >= 4) {
+            continue;
+        }
+        const std::string placed = sent.options.place(entry.path, false);
+        if (placed.empty() || filetype::fromName(placed) != filetype::Kind::Homebrew) {
+            continue;
+        }
+        ++tried;
+        const int64_t free = platform::sdFreeBytes();
+        if (free >= 0 && entry.size + (1u << 20) > static_cast<uint64_t>(free)) {
+            return SameApp::NoRoom;
+        }
+        archives::Options one;
+        one.only = {entry.path};
+        one.existing = archives::Existing::Overwrite;
+        one.place = [](const std::string &, bool directory) {
+            return directory ? std::string() : std::string("app.3dsx");
+        };
+        const archives::Result taken =
+            tasks::extract(archive, sent.listing, scratch, one);
+        bool same = false;
+        for (const std::string &app : theirs) {
+            same = same || (taken.ok && taken.extracted == 1 &&
+                            remote::sameApp(app, scratch + "app.3dsx"));
+        }
+        fs::removeFolderTree(scratch);
+        sdChanged(scratch);
+        if (taken.cancelled) {
+            return SameApp::Stopped;
+        }
+        if (same) {
+            return SameApp::Yes;
+        }
+    }
+    return SameApp::No;
+}
+
 void App::addToQueue(const std::vector<std::string> &links,
-                     const std::string &folder, bool announce)
+                     const std::string &folder, bool announce, bool sent)
 {
     size_t added = 0;
     for (const std::string &link : links) {
@@ -582,6 +735,7 @@ void App::addToQueue(const std::vector<std::string> &links,
         item.id = nextQueueId_++;
         item.url = link;
         item.folder = folder;
+        item.sent = sent;
         queue_.push_back(item);
         ++added;
     }
@@ -602,9 +756,12 @@ void App::runQueue(const std::vector<uint64_t> *ids,
     const auto report = [results](const std::string &url, HistoryStatus status,
                                   const std::string &name,
                                   const std::string &path, uint64_t bytes,
-                                  const std::string &message) {
+                                  const std::string &message,
+                                  const std::string &filename = "",
+                                  const std::string &host = "") {
         if (results != nullptr) {
-            results->push_back({url, status, name, path, bytes, message});
+            results->push_back(
+                {url, status, name, path, bytes, message, filename, host});
         }
     };
     std::vector<uint64_t> order;
@@ -640,9 +797,13 @@ void App::runQueue(const std::vector<uint64_t> *ids,
             continue;
         }
         QueuedLink item = *found;
-        if (!fs::makeDirectories(item.folder)) {
+        // A sender's link downloads into the Download Folder and moves into
+        // the sender's folder only once it is known to belong there, so
+        // nothing else is made or left in it.
+        const std::string downloadTo = item.sent ? settings_.destination : item.folder;
+        if (!fs::makeDirectories(downloadTo)) {
             found->state = QueuedLink::State::Failed;
-            found->message = "Could not create " + item.folder + ".";
+            found->message = "Could not create " + downloadTo + ".";
             report(item.url, HistoryStatus::Failed, "", "", 0, found->message);
             ++failed;
             continue;
@@ -650,7 +811,13 @@ void App::runQueue(const std::vector<uint64_t> *ids,
 
         net::Request request;
         request.url = item.url;
-        request.folder = item.folder;
+        request.folder = downloadTo;
+        // Never the console itself, and for a link another site sent,
+        // nothing on this network.
+        request.refuse = [foreign = item.foreign](const std::string &to,
+                                                  const std::string &from) {
+            return remote::addressRefused(to, from, foreign);
+        };
         request.caFile = http::CaBundle;
         request.userAgent = http::UserAgent;
         request.allowResume = settings_.resumeDownloads;
@@ -671,7 +838,7 @@ void App::runQueue(const std::vector<uint64_t> *ids,
             found->state = QueuedLink::State::Stopped;
             found->message = "Stopped.";
             HistoryEntry stoppedEntry = historyEntry(
-                item.url, item.folder, HistoryStatus::Cancelled, result.message);
+                item.url, downloadTo, HistoryStatus::Cancelled, result.message);
             stoppedEntry.name = result.filename;
             record(stoppedEntry);
             report(item.url, HistoryStatus::Cancelled, result.filename, "",
@@ -682,7 +849,7 @@ void App::runQueue(const std::vector<uint64_t> *ids,
         if (result.outcome != net::Outcome::Completed) {
             found->state = QueuedLink::State::Failed;
             found->message = result.message;
-            HistoryEntry entry = historyEntry(item.url, item.folder,
+            HistoryEntry entry = historyEntry(item.url, downloadTo,
                                               HistoryStatus::Failed,
                                               result.message);
             entry.resumable = result.resumable;
@@ -695,12 +862,28 @@ void App::runQueue(const std::vector<uint64_t> *ids,
             continue;
         }
 
-        // A queue never stops to ask about names: a clash keeps both.
+        // A queue never stops to ask about names: a clash keeps both. A
+        // sender's folder takes only apps and archives, and only from where
+        // the link was found to lead before the console asked; anything
+        // else it sent goes to the Download Folder.
+        const std::string came =
+            url::host(result.effectiveUrl.empty() ? item.url : result.effectiveUrl);
+        const bool fromChecked =
+            !item.host.empty() && url::site(came) == url::site(item.host);
+        const bool belongs = fromChecked && remote::sentFileAllowed(result.filename);
+        std::string folder = item.folder;
+        if (item.sent && belongs && fs::makeDirectories(item.folder)) {
+            sdChanged(item.folder);
+        } else if (item.sent) {
+            folder = settings_.destination;
+            logging::info("receive.moved", {{"file", result.filename},
+                                            {"why", fromChecked ? "type" : "host"}});
+        }
         const finalize::Result placed =
-            finalize::commit(result.partPath, item.folder, result.filename,
+            finalize::commit(result.partPath, folder, result.filename,
                              false, platform::now());
         HistoryEntry entry = historyEntry(
-            item.url, item.folder,
+            item.url, folder,
             placed.ok ? HistoryStatus::Saved : HistoryStatus::Failed,
             placed.ok ? "Saved from the queue" : placed.message);
         entry.bytes = result.bytes;
@@ -709,7 +892,8 @@ void App::runQueue(const std::vector<uint64_t> *ids,
         record(entry);
         report(item.url, placed.ok ? HistoryStatus::Saved : HistoryStatus::Failed,
                placed.ok ? basename(placed.path) : result.filename, placed.path,
-               result.bytes, placed.ok ? "" : placed.message);
+               result.bytes, placed.ok ? "" : placed.message, result.filename,
+               came);
         if (!placed.ok) {
             found->state = QueuedLink::State::Failed;
             found->message = placed.message;
@@ -911,8 +1095,12 @@ void App::receiveScreen()
     }
     net::FileSharing sharing;
     sharing.root = "sdmc:";
+    job.self = localAddress();
     sharing.access = [&job](const std::string &from, const std::string &device,
                             bool ask) { return job.access(from, device, ask); };
+    sharing.refuseLinks = [&job](const std::string &from) {
+        return job.refusesLinks(from);
+    };
     sharing.freeSpace = []() { return platform::sdFreeBytes(); };
     sharing.totalSpace = []() { return platform::sdTotalBytes(); };
     sharing.status = [&job]() { return job.snapshot(); };
@@ -1128,12 +1316,120 @@ void App::receiveScreen()
         job.finish(text, done == count);
     };
 
+    // A link the queue kept beside a file of the same name, in the folder
+    // its sender named: now that the server's name for it is known, the
+    // console says whether it replaces older. True when it did.
+    const auto askToReplace = [&](QueueResult &result, const std::string &older,
+                                  const std::string &sender) {
+        job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
+        if (!replaceSent(result.path, older, result.host, sender)) {
+            return false;
+        }
+        for (HistoryEntry &entry : history_) {
+            if (entry.path == result.path) {
+                entry.path = older;
+            }
+        }
+        storage::saveHistory(history_);
+        result.path = older;
+        result.name = basename(older);
+        return true;
+    };
+
+    // A sender's extract=1, once its archive is saved. A full read, as every
+    // entry is checked before anything is asked; only compressed tars and
+    // solid RARs cost more that way. agreed: the console said yes before the
+    // download.
+    const auto offerSentExtraction = [&](const QueueResult &result,
+                                         bool agreed, const std::string &sender) {
+        SentExtraction sent;
+        std::string error;
+        job.setState("busy", "Reading an archive on the 3DS.", true);
+        const bool read = screens::readArchive(result.path, archives::Scan::Full,
+                                               sent.listing, error);
+        job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
+        if (!read) {
+            if (!error.empty()) {
+                ui::message("Cannot Extract", error, ui::Tone::Error,
+                            "Saved as " + result.path + ".");
+            }
+            return;
+        }
+        archives::Listing shown;
+        // The server's name, not the one kept beside an older copy, so a
+        // second send goes into the same folder.
+        if (!remote::sentExtraction(sent.listing, result.filename,
+                                    sent.options, shown)) {
+            logging::warn("extract.refused", {{"file", basename(result.path)}});
+            ui::message("Not Extracted",
+                        "A sent archive only goes into one folder in /3ds/.",
+                        ui::Tone::Warning, "Saved as " + result.path + ".");
+            return;
+        }
+        // What it adds to a folder already there, for the question.
+        std::string summary = "Saved as " + result.path + ".";
+        const std::string into = std::string(remote::ArchiveTarget) + shown.top + "/";
+        std::vector<std::string> clashes;
+        if (shown.topIsFolder && fs::directoryExists(into) &&
+            archives::existingFiles(shown, remote::ArchiveTarget, clashes)) {
+            const std::set<std::string> there(clashes.begin(), clashes.end());
+            std::vector<std::string> added;
+            for (const archives::Entry &entry : shown.entries) {
+                if (!entry.directory && there.count(entry.path) == 0) {
+                    added.push_back(basename(entry.path));
+                }
+            }
+            if (!added.empty()) {
+                summary += " Adds " + plural(added.size(), "new file") + " to " +
+                           into + ": " + added[0];
+                for (size_t index = 1; index < added.size() && index < 3; ++index) {
+                    summary += ", " + added[index];
+                }
+                summary += added.size() > 3
+                               ? " and " + std::to_string(added.size() - 3) + " more."
+                               : ".";
+            }
+        }
+        sent.agreed = agreed;
+        sent.host = result.host;
+        sent.sender = sender;
+        // The page's text names no file, as any device on the network sees it.
+        sent.extracting = [&](bool started) {
+            if (started) {
+                job.setState("busy", "Extracting on the 3DS.", true);
+            } else {
+                job.setState("choosing", "Waiting for you to choose on the 3DS.",
+                             true);
+            }
+        };
+        job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
+        offerExtraction(result.path, remote::ArchiveTarget, summary,
+                        "Extract it into /3ds/?", &shown, &sent);
+    };
+
+    // Addresses whose links were turned down while Receive is open: their
+    // next question offers Don't Allow in place of Add to Queue.
+    std::set<std::string> turnedDown;
+
     // What a sender handed over: CIAs on the SD card to install, or links.
     const auto handle = [&](net::Received &received) {
-        logging::info("receive.got", {{"links", received.links.size()},
-                                      {"cias", received.install.size()},
-                                      {"fbi", received.replySocket >= 0}});
+        logging::info("receive.got",
+                      {{"links", received.links.size()},
+                       {"cias", received.install.size()},
+                       {"fbi", received.replySocket >= 0},
+                       {"folder", received.options.folder},
+                       {"replace", received.options.replace ? "yes" : ""},
+                       {"extract", received.options.extract ? "yes" : ""}});
+        // Links from a device turned down since they arrived, or from the
+        // console itself, go no further.
+        if (!received.links.empty() && received.replySocket < 0 &&
+            job.refusesLinks(received.from)) {
+            logging::info("receive.refused", {{"from", received.from}});
+            net::finishReceived(received);
+            return;
+        }
         const std::string who = whoIs(received.device, received.from);
+        const std::string sender = senderOf(received.device, received.from);
         const std::vector<ui::Fact> from = {
             {"From", senderOf(received.device, received.from)}};
         if (!received.install.empty()) {
@@ -1166,23 +1462,121 @@ void App::receiveScreen()
             received.links.begin(), received.links.end(), [](const std::string &link) {
                 return filetype::fromName(nameOf(link)) == filetype::Kind::Cia;
             });
-        enum class Choice { Install, Download, Queue, Cancel };
+        // Where each link leads once its redirects are followed, found before
+        // asking: the question names where the files really come from, and
+        // what is downloaded is held to it (QueuedLink::host).
+        std::map<std::string, std::string> leadsTo;
+        // Never the console itself, and for links another site sent,
+        // nothing on this network: the check would otherwise reach them
+        // before anyone agreed to anything.
+        const bool anotherSite = !fromFbiTool && !received.ownPage;
+        std::set<std::string> refused;
+        job.setState("busy", "Checking the links on the 3DS.", true);
+        const uint64_t checkStarted = osGetTime();
+        const bool checked = tasks::busy(
+            "Receive", "Checking " + plural(received.links.size(), "link") + "...",
+            [&](tasks::Busy &busy) {
+                busy.total = received.links.size();
+                for (const std::string &link : received.links) {
+                    if (busy.cancel.load()) {
+                        break;
+                    }
+                    net::FetchRequest request;
+                    request.url = link;
+                    request.caFile = http::CaBundle;
+                    request.userAgent = http::UserAgent;
+                    request.connectTimeoutSeconds = 10;
+                    request.totalTimeoutSeconds = 15;
+                    request.cancel = &busy.cancel;
+                    request.refuse = [anotherSite](const std::string &to,
+                                                   const std::string &from) {
+                        return remote::addressRefused(to, from, anotherSite);
+                    };
+                    const net::Destination destination = net::whereTo(request);
+                    if (destination.ok) {
+                        leadsTo[link] = url::host(destination.url);
+                    } else if (destination.refused) {
+                        refused.insert(link);
+                    }
+                    ++busy.done;
+                }
+            },
+            true);
+        size_t elsewhere = 0;
+        for (const auto &found : leadsTo) {
+            elsewhere += found.second != url::host(found.first) ? 1 : 0;
+        }
+        logging::info("receive.checked",
+                      {{"links", received.links.size()},
+                       {"elsewhere", elsewhere},
+                       {"refused", refused.size()},
+                       {"unknown", received.links.size() - leadsTo.size()},
+                       {"ms", osGetTime() - checkStarted}});
+        if (!checked) {
+            job.finish("Not downloaded: the check was stopped on the 3DS.", false, true);
+            net::finishReceived(received);
+            return;
+        }
+        received.links.erase(
+            std::remove_if(received.links.begin(), received.links.end(),
+                           [&](const std::string &link) {
+                               return refused.count(link) != 0;
+                           }),
+            received.links.end());
+        if (received.links.empty()) {
+            job.finish("Not downloaded: the links lead to addresses on this network.",
+                       false, true);
+            net::finishReceived(received);
+            return;
+        }
+        // Comes from the site the check found its link to lead to.
+        const auto fromChecked = [&](const QueueResult &result) {
+            const auto found = leadsTo.find(result.url);
+            return found != leadsTo.end() &&
+                   url::site(found->second) == url::site(result.host);
+        };
+
+        enum class Choice { Install, Download, Queue, Cancel, DontAllow };
+        // Once a device's links were turned down, Don't Allow takes Add to
+        // Queue's place, to stop a page that keeps sending.
+        const bool turnedDownBefore = turnedDown.count(received.from) > 0;
         const std::vector<Choice> choices =
             fromFbiTool && allCias && installer::available()
                 ? std::vector<Choice>{Choice::Install, Choice::Download, Choice::Cancel}
             : fromFbiTool ? std::vector<Choice>{Choice::Download, Choice::Cancel}
-                          : std::vector<Choice>{Choice::Download, Choice::Queue,
-                                                Choice::Cancel};
+            : turnedDownBefore
+                ? std::vector<Choice>{Choice::Download, Choice::Cancel,
+                                      Choice::DontAllow}
+                : std::vector<Choice>{Choice::Download, Choice::Queue, Choice::Cancel};
         const bool offerInstall = choices.front() == Choice::Install;
         const size_t count = received.links.size();
         std::vector<Named> names;
         for (const std::string &link : received.links) {
-            names.push_back({nameOf(link), url::host(link)});
+            const auto found = leadsTo.find(link);
+            names.push_back(
+                {nameOf(link), found != leadsTo.end() ? found->second : url::host(link)});
         }
+        const remote::SendOptions &options = received.options;
+        const std::string folder =
+            options.folder.empty() ? settings_.destination : options.folder;
         std::vector<ui::Fact> facts = from;
         if (!offerInstall) {
-            facts.push_back({"Save to", settings_.destination});
+            facts.push_back({"Save to", folder});
         }
+        // Holds the links just queued to where the check found them to lead,
+        // or to nowhere when it could not tell.
+        const auto holdToChecked = [&]() {
+            for (QueuedLink &item : queue_) {
+                if (item.folder != folder ||
+                    std::find(received.links.begin(), received.links.end(),
+                              item.url) == received.links.end()) {
+                    continue;
+                }
+                const auto found = leadsTo.find(item.url);
+                item.host = found != leadsTo.end() ? found->second : "";
+                item.foreign = anotherSite;
+            }
+        };
         ui::Dialog dialog;
         dialog.header = "Receive";
         dialog.title = offerInstall
@@ -1190,12 +1584,19 @@ void App::receiveScreen()
                            : "Download " + plural(count, "file") + " from " + who + "?";
         dialog.tone = ui::Tone::Info;
         for (const Choice choice : choices) {
-            dialog.buttons.push_back(choice == Choice::Install    ? "Install"
-                                     : choice == Choice::Download ? "Download"
-                                     : choice == Choice::Queue    ? "Add to Queue"
-                                                                  : "Cancel");
+            dialog.buttons.push_back(choice == Choice::Install     ? "Install"
+                                     : choice == Choice::Download  ? "Download"
+                                     : choice == Choice::Queue     ? "Add to Queue"
+                                     : choice == Choice::DontAllow ? "Don't Allow"
+                                                                   : "Cancel");
         }
-        dialog.cancelButton = static_cast<int>(choices.size()) - 1;
+        dialog.cancelButton = static_cast<int>(
+            std::find(choices.begin(), choices.end(), Choice::Cancel) - choices.begin());
+        // Another site may have sent these without the person asking, so
+        // its question starts on Cancel.
+        if (!fromFbiTool && !received.ownPage) {
+            dialog.initial = dialog.cancelButton;
+        }
         dialog.drawTop = [&]() { drawHandedOver(names, facts); };
         job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
         const int picked = ui::choose(dialog);
@@ -1227,13 +1628,49 @@ void App::receiveScreen()
                                  plural(count, "CIA") + " on the 3DS.",
                        done == count, true);
         } else if (choice == Choice::Download) {
+            // With Ask to Extract off, a sender's extract=1 on links to
+            // archives is put to the console now, before anything downloads,
+            // starting on Not Now. With it on, archives are offered after.
+            bool agreed = false;
+            if (options.extract && !settings_.offerZipExtraction) {
+                const size_t archiveLinks = static_cast<size_t>(std::count_if(
+                    received.links.begin(), received.links.end(),
+                    [](const std::string &link) {
+                        return filetype::fromName(nameOf(link)) ==
+                               filetype::Kind::Archive;
+                    }));
+                if (archiveLinks > 0) {
+                    ui::Dialog question;
+                    question.header = "Receive";
+                    question.title =
+                        archiveLinks == 1
+                            ? "Extract the archive after it downloads?"
+                            : "Extract the archives after they download?";
+                    question.tone = ui::Tone::Info;
+                    question.buttons = {"Extract", "Not Now"};
+                    question.initial = 1;
+                    question.cancelButton = 1;
+                    // Two facts, as the top screen fits beside four names.
+                    std::vector<ui::Fact> where = from;
+                    where.push_back({"Extract to", remote::ArchiveTarget});
+                    question.drawTop = [&]() { drawHandedOver(names, where); };
+                    agreed = ui::choose(question) == 0;
+                }
+            }
+            const bool extract =
+                options.extract && (agreed || settings_.offerZipExtraction);
+            turnedDown.erase(received.from);
             const uint64_t first = nextQueueId_;
-            addToQueue(received.links, settings_.destination, false);
+            addToQueue(received.links, folder, false, !options.folder.empty());
+            holdToChecked();
             std::vector<uint64_t> ids;
             for (const QueuedLink &item : queue_) {
+                // When the sender named a folder, the same link queued for
+                // another folder stays in the Queue.
                 if (item.id >= first ||
-                    std::find(received.links.begin(), received.links.end(),
-                              item.url) != received.links.end()) {
+                    ((options.folder.empty() || item.folder == folder) &&
+                     std::find(received.links.begin(), received.links.end(),
+                               item.url) != received.links.end())) {
                     ids.push_back(item.id);
                 }
             }
@@ -1241,22 +1678,101 @@ void App::receiveScreen()
             job.setState("downloading", "Downloading " + links + ".", true);
             std::vector<QueueResult> results;
             runQueue(&ids, &results);
+            // Questions come once the downloads are done, as the queue never
+            // stops to ask in between, and not at all after a stop.
+            const bool stopped = std::any_of(
+                results.begin(), results.end(), [](const QueueResult &result) {
+                    return result.status == HistoryStatus::Cancelled;
+                });
+            if (options.replace && !options.folder.empty() && !stopped) {
+                // Never "older" than a file this same send saved, in any
+                // case, as FAT ignores it.
+                std::set<std::string> saved;
+                for (const QueueResult &result : results) {
+                    saved.insert(text::lower(result.path));
+                }
+                for (QueueResult &result : results) {
+                    if (!ui::keepRunning()) {
+                        break;
+                    }
+                    const bool kept =
+                        fromChecked(result) &&
+                        (result.status == HistoryStatus::Saved ||
+                         (result.status == HistoryStatus::Installed &&
+                          fs::fileExists(result.path)));
+                    const std::string older =
+                        kept ? remote::replaceCandidate(result.path,
+                                                        result.filename, folder,
+                                                        saved)
+                             : "";
+                    if (!older.empty() && askToReplace(result, older, sender)) {
+                        saved.insert(text::lower(older));
+                    }
+                }
+            }
             for (const QueueResult &result : results) {
                 receiveLog_.linkEnded(result.url, rowState(result.status),
                                       result.name, result.path, result.bytes,
                                       result.message, clockNow());
                 installed += result.status == HistoryStatus::Installed ? 1 : 0;
             }
+            for (const QueueResult &result : results) {
+                if (!extract || stopped || !ui::keepRunning()) {
+                    break;
+                }
+                // A yes covers the links that looked like archives when it
+                // was asked; any other archive is offered starting on Not Now.
+                if (result.status == HistoryStatus::Saved && fromChecked(result) &&
+                    filetype::fromName(basename(result.path)) ==
+                        filetype::Kind::Archive) {
+                    offerSentExtraction(
+                        result,
+                        agreed && filetype::fromName(nameOf(result.url)) ==
+                                      filetype::Kind::Archive,
+                        sender);
+                }
+            }
+            // A file that came from somewhere the check did not find its link
+            // to lead got none of what the sender asked for.
+            const auto strayed = std::find_if(
+                results.begin(), results.end(), [&](const QueueResult &result) {
+                    return result.status == HistoryStatus::Saved &&
+                           !fromChecked(result);
+                });
+            if ((!options.folder.empty() || options.extract) &&
+                strayed != results.end() && ui::keepRunning()) {
+                job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
+                const auto found = leadsTo.find(strayed->url);
+                ui::message("Saved in the Download Folder",
+                            strayed->name + " came from " + strayed->host +
+                                (found != leadsTo.end()
+                                     ? ", not " + found->second + "."
+                                     : ", and its link could not be checked first."),
+                            ui::Tone::Warning, strayed->path);
+            }
             // What a stop left behind is still in the Queue.
             receiveLog_.settleLinks(RowState::Queued, clockNow());
             linksIn += static_cast<uint32_t>(count);
             job.finish("Done with " + links + " on the 3DS.", true, true);
         } else if (choice == Choice::Queue) {
-            addToQueue(received.links, settings_.destination, false);
+            // The Queue keeps only the folder: Download All keeps both on a
+            // clash, as it always has.
+            turnedDown.erase(received.from);
+            addToQueue(received.links, folder, false, !options.folder.empty());
+            holdToChecked();
             receiveLog_.addLinks(received, RowState::Queued, clockNow());
             linksIn += static_cast<uint32_t>(count);
             job.finish("Added " + links + " to the Queue on the 3DS.", true, true);
+        } else if (choice == Choice::DontAllow) {
+            // Until Receive closes, its links and the file page are refused
+            // before they reach the console.
+            job.denyLinks(received.from);
+            logging::info("receive.denied", {{"from", received.from}});
+            job.finish("Not downloaded: the 3DS turned this device down.", false, true);
         } else {
+            if (!fromFbiTool) {
+                turnedDown.insert(received.from);
+            }
             job.finish("Not downloaded: Cancel was chosen on the 3DS.", false, true);
         }
         net::finishReceived(received);

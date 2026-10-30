@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -20,6 +21,10 @@ struct FetchRequest {
     long totalTimeoutSeconds = 30;
     // Checked while the request runs; setting it ends the request early.
     const std::atomic<bool> *cancel = nullptr;
+    // Asked for every connection, redirects too, with the address it
+    // reached and the console's end of it, before anything is sent: true
+    // turns it away (see remote::addressRefused). Unset allows any.
+    std::function<bool(const std::string &to, const std::string &from)> refuse;
 };
 
 struct FetchResult {
@@ -35,5 +40,18 @@ struct FetchResult {
 };
 
 FetchResult fetch(const FetchRequest &request);
+
+// Where request.url leads once its redirects are followed, as a download of
+// it would be (the same request, redirect limit and protocols), taking only
+// the first byte of the answer. ok when an answer came, whatever its status;
+// url is then the address that gave it.
+struct Destination {
+    bool ok = false;
+    bool cancelled = false;
+    bool refused = false; // request.refuse turned an address away
+    std::string url;
+    std::string message; // for the user when !ok
+};
+Destination whereTo(const FetchRequest &request);
 
 } // namespace net

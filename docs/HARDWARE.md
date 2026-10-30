@@ -244,6 +244,26 @@ with a few hundred files.
     consoles on Receive the second answers to 3ds-2.local. Record whether
     the console joined the multicast group at all (http://3ds.local is
     missing under the address if it did not).
+58g. A page's /send with folder=/3ds/<app>/: a .3dsx lands there, a .ini
+    sent the same way lands in the Download Folder, and
+    folder=/3ds/<app>/data/ is refused. With replace=1, an update of the
+    same app asks Keep Both / Replace and Replace leaves one file; a
+    different app with the same file name keeps both without asking.
+58h. extract=1 on a ZIP of an app already in /3ds/<app>/: the question
+    lists the new files it adds, its settings file in that folder is
+    unchanged afterwards, and the new .3dsx is asked about, also when the
+    ZIP renamed it. A ZIP whose top folder is another app's folder is not
+    extracted, and a ZIP holding only 3ds/shortcut.xml is not either.
+58i. A link sent by another site (a page with an image tag pointing at
+    /send) asks on the console starting on Cancel; one from 3dsDL's own page
+    starts on Download. Cancel, then send again from the same phone: the
+    question offers Don't Allow, after which the page and its links are
+    refused until Receive closes, while the page's files still ask
+    separately. Twenty-one links are refused at once. A link from another
+    site to http://192.168.x.x/ or the console's own address is dropped
+    before the question.
+58j. A link that redirects (a GitHub release asset) shows the host it ends
+    on before Download, after a short Checking wait that B stops.
 
 ### Saves, tickets and sounds
 

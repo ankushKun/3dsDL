@@ -10,6 +10,9 @@
 // run it against a local fixture server.
 namespace net {
 
+// How many redirects a download follows, and whereTo with it.
+constexpr long MaxRedirects = 10;
+
 enum class Phase { Connecting, Downloading, Restarting };
 
 // Receives updates from the transfer. Every method is called on the thread
@@ -57,6 +60,10 @@ struct Request {
     uint64_t maxFileSize = 0xffffffffULL;
     // Free bytes in a folder, or -1 when unknown. Optional.
     std::function<int64_t(const std::string &)> freeSpace;
+    // Asked for every connection, redirects too, with the address it
+    // reached and the console's end of it, before anything is sent: true
+    // turns it away and fails the download. Unset allows any.
+    std::function<bool(const std::string &to, const std::string &from)> refuse;
     // Test seam for simulating SD card failures. Defaults to fwrite.
     std::function<size_t(const void *, size_t, FILE *)> write;
 };

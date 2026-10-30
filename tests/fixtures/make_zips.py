@@ -84,6 +84,19 @@ def main(folder):
         handle.seek(0)
         handle.write(data)
 
+    # One name in the central directory, another in the local header that a
+    # sender's archive would also allow, and a bzip2 entry so libarchive
+    # (which reads the local one) extracts it.
+    write(join("renamed.zip"), [
+        ("3ds/a/abcd.3dsx", b"planted\n", zipfile.ZIP_STORED),
+        ("3ds/a/bz.txt", b"packed with bzip2\n", zipfile.ZIP_BZIP2),
+    ])
+    with open(join("renamed.zip"), "r+b") as handle:
+        data = bytearray(handle.read())
+        data[30:30 + 15] = b"3ds/a/zzzz.3dsx"
+        handle.seek(0)
+        handle.write(data)
+
     # Flip one byte of stored data so the CRC check must fail.
     write(join("corrupt.zip"), [("data.bin", b"A" * 1000)],
           compression=zipfile.ZIP_STORED)

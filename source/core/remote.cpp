@@ -1,11 +1,18 @@
 #include "remote.hpp"
 
+#include "archives.hpp"
+#include "cia.hpp"
 #include "file_ops.hpp"
+#include "file_types.hpp"
+#include "finalize.hpp"
+#include "naming.hpp"
 #include "text.hpp"
+#include "title_meta.hpp"
 #include "url.hpp"
 
 #include <arpa/inet.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -78,6 +85,26 @@ const char *statusText(int status)
     default:
         return "Error";
     }
+}
+
+// A name a sender may not use: "~" and a digit anywhere, which on FAT can
+// be another file's or folder's short name (BOOT~1.FIR for boot.firm),
+// anything past ASCII, whose case FAT may fold in ways text::lower does not,
+// or an end in a space or a dot, which some FAT drivers drop, making it
+// another name ("3dsDL." is "3dsDL").
+bool unsafeSentName(const std::string &name)
+{
+    if (!name.empty() && (name.back() == ' ' || name.back() == '.')) {
+        return true;
+    }
+    for (size_t at = 0; at < name.size(); ++at) {
+        const unsigned char c = static_cast<unsigned char>(name[at]);
+        if (c >= 0x80 || (c == '~' && at + 1 < name.size() &&
+                          std::isdigit(static_cast<unsigned char>(name[at + 1])))) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -345,7 +372,11 @@ std::string jsonError(int status, const std::string &message)
                         "{\"error\":" + jsonString(message) + "}");
 }
 
-bool apiRequestAllowed(const HttpRequest &request, std::string &why)
+namespace {
+
+// Whether the request was made to the console by its address or a .local
+// name, rather than by a name another site controls (DNS rebinding).
+bool toConsole(const HttpRequest &request)
 {
     const auto host = request.headers.find("host");
     std::string name = host == request.headers.end() ? "" : host->second;
@@ -362,18 +393,72 @@ bool apiRequestAllowed(const HttpRequest &request, std::string &why)
                          inet_aton(name.c_str(), &parsed) != 0;
     const bool local = name.size() > 6 &&
                        name.compare(name.size() - 6, 6, ".local") == 0;
-    if (!address && !local) {
+    return address || local;
+}
+
+bool markedByPage(const HttpRequest &request)
+{
+    const auto marker = request.headers.find("x-requested-with");
+    return marker != request.headers.end() && marker->second == "3dsDL";
+}
+
+} // namespace
+
+bool apiRequestAllowed(const HttpRequest &request, std::string &why)
+{
+    if (!toConsole(request)) {
         why = "Open this page by the console's address.";
         return false;
     }
-    if (request.method != "GET") {
-        const auto marker = request.headers.find("x-requested-with");
-        if (marker == request.headers.end() || marker->second != "3dsDL") {
-            why = "Changes must come from the 3dsDL page.";
-            return false;
-        }
+    if (request.method != "GET" && !markedByPage(request)) {
+        why = "Changes must come from the 3dsDL page.";
+        return false;
     }
     return true;
+}
+
+bool fromOwnPage(const HttpRequest &request)
+{
+    return toConsole(request) && markedByPage(request);
+}
+
+bool addressRefused(const std::string &to, const std::string &from,
+                    bool privateToo)
+{
+    if (to.empty()) {
+        return false;
+    }
+    if (to == from) {
+        return true;
+    }
+    std::string v4 = to;
+    const std::string lower = text::lower(to);
+    if (lower.rfind("::ffff:", 0) == 0) {
+        v4 = to.substr(7); // an IPv4 address written as IPv6
+    } else if (lower.find(':') != std::string::npos) {
+        if (lower == "::1" || lower == "::") {
+            return true;
+        }
+        // Unique local (fc00::/7) and link-local (fe80::/10) addresses.
+        return privateToo &&
+               (lower.rfind("fc", 0) == 0 || lower.rfind("fd", 0) == 0 ||
+                lower.rfind("fe8", 0) == 0 || lower.rfind("fe9", 0) == 0 ||
+                lower.rfind("fea", 0) == 0 || lower.rfind("feb", 0) == 0);
+    }
+    in_addr parsed {};
+    if (inet_aton(v4.c_str(), &parsed) == 0) {
+        return false;
+    }
+    const uint32_t ip = ntohl(parsed.s_addr);
+    const auto in = [ip](uint32_t network, int bits) {
+        return (ip >> (32 - bits)) == (network >> (32 - bits));
+    };
+    if (in(0x7f000000, 8) || in(0x00000000, 8)) {
+        return true; // loopback, and "this network"
+    }
+    return privateToo &&
+           (in(0x0a000000, 8) || in(0xac100000, 12) || in(0xc0a80000, 16) ||
+            in(0xa9fe0000, 16) || in(0x64400000, 10) || ip >= 0xe0000000);
 }
 
 bool localPath(const std::string &root, const std::string &webPath,
@@ -402,6 +487,228 @@ bool localPath(const std::string &root, const std::string &webPath,
     }
     out = path == root ? root + "/" : path;
     return true;
+}
+
+bool sendOptions(const std::string &form, SendOptions &out, std::string &why)
+{
+    out = SendOptions();
+    if (extractLinks(formValue(form, "links")).size() > MaxSentLinks) {
+        why = "Send at most " + std::to_string(MaxSentLinks) + " links at once.";
+        return false;
+    }
+    const std::string folder = formValue(form, "folder");
+    if (!folder.empty()) {
+        std::string path;
+        if (!localPath("sdmc:", folder, path) || !sendFolderAllowed(path)) {
+            why = "Links can only be saved in /3ds/ or /cias/, or one folder "
+                  "in them.";
+            return false;
+        }
+        out.folder = path.back() == '/' ? path : path + "/";
+        // Apps live in /3ds/ or one folder in it; what is deeper is their
+        // data, which a sender has no business in.
+        if (std::count(out.folder.begin() + 6, out.folder.end(), '/') > 2) {
+            out = SendOptions();
+            why = "Links can only be saved in /3ds/ or /cias/, or one folder "
+                  "in them.";
+            return false;
+        }
+    }
+    out.replace = formValue(form, "replace") == "1";
+    out.extract = formValue(form, "extract") == "1";
+    return true;
+}
+
+bool sendFolderAllowed(const std::string &path)
+{
+    const std::string card = "sdmc:/";
+    const std::string folder =
+        text::lower(path) + (!path.empty() && path.back() == '/' ? "" : "/");
+    const auto under = [&](const std::string &top) {
+        return folder.compare(0, top.size(), top) == 0;
+    };
+    if (!(under("sdmc:/3ds/") && !under("sdmc:/3ds/3dsdl/")) &&
+        !under("sdmc:/cias/")) {
+        return false;
+    }
+    for (size_t start = card.size(); start < folder.size();) {
+        const size_t end = folder.find('/', start);
+        const std::string part = folder.substr(start, end - start);
+        if (part.empty() || part == "." || part == ".." || unsafeSentName(part)) {
+            return false;
+        }
+        start = end + 1;
+    }
+    return true;
+}
+
+bool sentNameAllowed(const std::string &filename)
+{
+    const std::string name = text::lower(filename);
+    return !name.empty() && !unsafeSentName(name) && name != "boot.3dsx" &&
+           name != "3dsdl.3dsx";
+}
+
+bool sentFileAllowed(const std::string &filename)
+{
+    const filetype::Kind kind = filetype::fromName(filename);
+    return sentNameAllowed(filename) &&
+           (kind == filetype::Kind::Homebrew || kind == filetype::Kind::Cia ||
+            kind == filetype::Kind::Archive);
+}
+
+bool sameApp(const std::string &older, const std::string &newer,
+             std::string *name)
+{
+    const filetype::Kind kind = filetype::fromName(older);
+    if (kind != filetype::fromName(newer)) {
+        return false;
+    }
+    std::string error;
+    if (kind == filetype::Kind::Cia) {
+        cia::Info was;
+        cia::Info now;
+        if (!cia::readInfo(older, was, error, true) ||
+            !cia::readInfo(newer, now, error, true) || was.titleId != now.titleId) {
+            return false;
+        }
+        if (name != nullptr) {
+            *name = !now.smdh.shortName.empty() ? now.smdh.shortName
+                                                : cia::titleIdText(now.titleId);
+        }
+        return true;
+    }
+    if (kind == filetype::Kind::Homebrew) {
+        titlemeta::Meta was;
+        titlemeta::Meta now;
+        if (!titlemeta::read(older, kind, was, error) ||
+            !titlemeta::read(newer, kind, now, error) || was.name.empty() ||
+            text::lower(was.name) != text::lower(now.name) ||
+            text::lower(was.publisher) != text::lower(now.publisher)) {
+            return false;
+        }
+        if (name != nullptr) {
+            *name = now.name;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool sentMayReplace(const std::string &filename)
+{
+    return sentNameAllowed(filename) &&
+           (text::endsWithNoCase(filename, ".3dsx") ||
+            text::endsWithNoCase(filename, ".cia"));
+}
+
+std::string replaceCandidate(const std::string &path, const std::string &filename,
+                             const std::string &folder,
+                             const std::set<std::string> &saved)
+{
+    if (naming::parentFolder(path) != folder || !sentMayReplace(filename)) {
+        return "";
+    }
+    const std::string older = finalize::keptBeside(path, filename);
+    return older.empty() || saved.count(text::lower(older)) > 0 ? "" : older;
+}
+
+bool sentArchive(const std::vector<std::string> &paths,
+                 const std::string &filename, SentArchive &out)
+{
+    out = SentArchive();
+    const auto head = [](const std::string &path) {
+        return text::lower(path.substr(0, path.find('/')));
+    };
+    bool fromRoot = false;
+    bool inFolder = false; // something is inside its one top
+    std::set<std::string> tops;
+    for (const std::string &path : paths) {
+        const std::string top = head(path);
+        fromRoot = fromRoot || top == "3ds" || top == "cias" || top == "luma" ||
+                   top == "gm9";
+        inFolder = inFolder || path.find('/') != std::string::npos;
+        tops.insert(top);
+    }
+    if (fromRoot) {
+        out.strip = "3ds/";
+        tops.clear();
+        for (const std::string &path : paths) {
+            if (path.size() > 4 && text::lower(path).rfind("3ds/", 0) == 0) {
+                tops.insert(head(path.substr(4)));
+            }
+        }
+        if (tops.size() != 1) {
+            return false;
+        }
+        out.top = *tops.begin();
+        // A loose file in its 3ds folder lands in /3ds/ itself, where only
+        // an app belongs: anything else there, such as a launcher's .xml
+        // shortcut, could pose as one.
+        const bool folder = std::any_of(
+            paths.begin(), paths.end(), [&](const std::string &path) {
+                return text::lower(path).rfind("3ds/" + out.top + "/", 0) == 0;
+            });
+        const filetype::Kind kind = filetype::fromName(out.top);
+        if (!folder && kind != filetype::Kind::Homebrew &&
+            kind != filetype::Kind::Cia) {
+            return false;
+        }
+    } else if (tops.size() == 1 && inFolder) {
+        out.top = *tops.begin();
+    } else {
+        out.prefix = naming::safeFilename(naming::asciiFilename(
+                         naming::archiveStem(filename))) +
+                     "/";
+        out.top = text::lower(out.prefix.substr(0, out.prefix.size() - 1));
+    }
+    return !out.top.empty() && out.top[0] != '.' &&
+           sendFolderAllowed(ArchiveTarget + out.top);
+}
+
+std::string sentArchivePlace(const SentArchive &archive,
+                             const std::string &path, bool directory)
+{
+    const size_t strip = archive.strip.size();
+    if (path.size() <= strip ||
+        text::lower(path.substr(0, strip)) != archive.strip) {
+        return ""; // the 3ds folder itself, or what is beside it
+    }
+    const std::string placed = archive.prefix + path.substr(strip);
+    const std::string name = placed.substr(placed.find_last_of('/') + 1);
+    const bool allowed =
+        text::lower(placed.substr(0, placed.find('/'))) == archive.top &&
+        sendFolderAllowed(ArchiveTarget + placed) &&
+        (directory ||
+         (sentNameAllowed(name) && !text::endsWithNoCase(name, ".firm")));
+    return allowed ? placed : "";
+}
+
+bool sentExtraction(const archives::Listing &listing,
+                    const std::string &filename, archives::Options &options,
+                    archives::Listing &shown)
+{
+    std::vector<std::string> paths;
+    paths.reserve(listing.entries.size());
+    for (const archives::Entry &entry : listing.entries) {
+        if (!entry.path.empty() && !archives::macMetadata(entry.path)) {
+            paths.push_back(entry.path);
+        }
+    }
+    SentArchive archive;
+    if (!sentArchive(paths, filename, archive)) {
+        return false;
+    }
+    options.place = [archive](const std::string &path, bool directory) {
+        return sentArchivePlace(archive, path, directory);
+    };
+    // libarchive takes a ZIP's names from its local headers, which need not
+    // be the ones its listing showed; 3dsDL's own reader writes the listing's.
+    if (listing.format == "ZIP" && !listing.ownZip) {
+        options.only = std::move(paths);
+    }
+    shown = archives::placed(listing, options.place);
+    return shown.fileCount > 0;
 }
 
 const char *mimeType(const std::string &name)

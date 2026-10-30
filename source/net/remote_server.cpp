@@ -1138,6 +1138,9 @@ bool Receiver::wait(int timeoutMs, Received &out)
             setsockopt(client, SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
         }
         const std::string from = inet_ntoa(peer.sin_addr);
+        // Fresh for each connection, so nothing a page sent without links
+        // rides along on an FBI send served in the same wait.
+        out = Received();
         const bool got = index == 0 ? serveWeb(client, from, out)
                                     : serveFbi(client, from, out);
         if (got) {
@@ -1247,9 +1250,26 @@ bool Receiver::serveWeb(int client, const std::string &from, Received &out)
         }
         const std::string &form =
             request.method == "POST" ? request.body : request.query;
+        // A device the console turned down sends nothing more until
+        // Receive closes.
+        if (sharing_.refuseLinks && sharing_.refuseLinks(from)) {
+            sendAll(client, remote::jsonError(403, "The 3DS did not allow this device."));
+            closeClient(client);
+            return false;
+        }
+        std::string why;
+        if (!remote::sendOptions(form, out.options, why)) {
+            // The page reads JSON; a plain form or another site, text.
+            sendAll(client, remote::fromOwnPage(request)
+                                ? remote::jsonError(400, why)
+                                : remote::httpResponse(400, "text/plain", why + "\n"));
+            closeClient(client);
+            return false;
+        }
         out.links = remote::extractLinks(remote::formValue(form, "links"));
         out.from = from;
         out.device = deviceOf(request);
+        out.ownPage = remote::fromOwnPage(request);
         got = !out.links.empty();
         const auto marker = request.headers.find("x-requested-with");
         if (marker != request.headers.end() && marker->second == "3dsDL") {

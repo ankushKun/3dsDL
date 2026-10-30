@@ -1,5 +1,7 @@
 #include "url.hpp"
 
+#include <vector>
+
 #include "text.hpp"
 
 #include <algorithm>
@@ -80,6 +82,43 @@ std::string host(const std::string &value)
         hostPart.erase(colon);
     }
     return text::lower(hostPart);
+}
+
+std::string site(const std::string &host)
+{
+    if (host.empty() || host.front() == '[' ||
+        host.find_first_not_of("0123456789.") == std::string::npos) {
+        return host;
+    }
+    std::vector<std::string> labels;
+    size_t start = 0;
+    while (true) {
+        const size_t dot = host.find('.', start);
+        labels.push_back(host.substr(start, dot - start));
+        if (dot == std::string::npos) {
+            break;
+        }
+        start = dot + 1;
+    }
+    const size_t count = labels.size();
+    if (count <= 2) {
+        return host;
+    }
+    static const char *const SecondLevels[] = {"co", "com", "net", "org", "gov",
+                                               "edu", "ac", "or", "ne", "go"};
+    size_t keep = 2;
+    if (labels[count - 1].size() == 2) {
+        for (const char *level : SecondLevels) {
+            if (labels[count - 2] == level) {
+                keep = 3;
+            }
+        }
+    }
+    std::string out;
+    for (size_t index = count - keep; index < count; ++index) {
+        out += (out.empty() ? "" : ".") + labels[index];
+    }
+    return out;
 }
 
 std::string lastPathSegment(const std::string &value)

@@ -634,7 +634,7 @@ const go = path => { location.hash = '#files:' + enc(path); };
 addEventListener('hashchange', route);
 
 // --- Links ------------------------------------------------------------------------
-function linksIn(text) { return [...new Set((text.match(/https?:\/\/[^\s<>"'()]+/g) || []).map(l => l.replace(/[.,;]+$/, '')))]; }
+function linksIn(text) { return [...new Set((text.match(/https?:\/\/[^\s<>"'()]+/gi) || []).map(l => l.replace(/[.,;]+$/, '')))]; }
 function linkName(l) { try { return decodeURIComponent(base(new URL(l).pathname)) || new URL(l).host; } catch (e) { return l; } }
 $('#sendform').noValidate = true;
 $('#linkbox').addEventListener('input', () => {
@@ -650,6 +650,11 @@ $('#sendform').addEventListener('submit', async e => {
     void box.offsetWidth;
     box.classList.add('shake');
     toast('There are no http or https links in that.', 'bad');
+    return;
+  }
+  // remote::MaxSentLinks
+  if (links.length > 20) {
+    toast('Send at most 20 links at once.', 'bad');
     return;
   }
   b.classList.add('busy');

@@ -138,7 +138,13 @@ std::string safeFilename(const std::string &name)
     if (text::startsWithNoCase(filename, ReservedPrefix)) {
         filename.insert(filename.begin(), '_');
     }
-    return shorten(filename);
+    // Cutting a long name short can end it in a space or a dot again.
+    filename = shorten(filename);
+    while (!filename.empty() &&
+           (filename.back() == ' ' || filename.back() == '.')) {
+        filename.pop_back();
+    }
+    return filename.empty() ? DefaultFilename : filename;
 }
 
 std::string asciiFilename(const std::string &name)

@@ -81,3 +81,17 @@ TEST("url: last path segment and percent decoding")
     CHECK_EQ(url::percentDecode(url::percentEncode("x=1&y=%2")),
              std::string("x=1&y=%2"));
 }
+
+TEST("url: the site a host belongs to")
+{
+    CHECK_EQ(url::site("dl3.example.com"), std::string("example.com"));
+    CHECK_EQ(url::site("example.com"), std::string("example.com"));
+    CHECK_EQ(url::site("a.b.example.co.uk"), std::string("example.co.uk"));
+    CHECK_EQ(url::site("files.example.com.au"), std::string("example.com.au"));
+    CHECK_EQ(url::site("www.example.de"), std::string("example.de"));
+    CHECK_EQ(url::site("192.168.1.2"), std::string("192.168.1.2"));
+    CHECK_EQ(url::site("[::1]"), std::string("[::1]"));
+    CHECK_EQ(url::site("localhost"), std::string("localhost"));
+    CHECK_EQ(url::site(""), std::string(""));
+    CHECK(url::site("objects.githubusercontent.com") != url::site("github.com"));
+}

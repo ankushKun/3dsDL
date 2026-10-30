@@ -7,6 +7,7 @@
 #include "image.hpp"
 #include "picture.hpp"
 #include "records.hpp"
+#include "remote.hpp"
 #include "sha256.hpp"
 #include "smdh.hpp"
 #include "text_doc.hpp"
@@ -608,4 +609,32 @@ TEST("picture: decodes from memory and fills a box by cutting the edges")
 
     CHECK(!picture::decode({1, 2, 3}, 48, 48, 0, result, error, true));
     CHECK(!error.empty());
+}
+
+TEST("remote: a sender's 3dsx replaces only the same app")
+{
+    TempDir temp;
+    const auto homebrew = [](const std::string &name, const std::string &publisher) {
+        std::string data(0x40, '\0');
+        std::memcpy(&data[0], "3DSX", 4);
+        data[4] = 0x2c;
+        putLe32(data, 0x20, 0x40);
+        putLe32(data, 0x24, smdh::Size);
+        return data + makeSmdh(name, publisher);
+    };
+    CHECK(writeText(temp.path() + "old.3dsx", homebrew("Checkpoint", "Bernardo")));
+    CHECK(writeText(temp.path() + "new.3dsx", homebrew("CHECKPOINT", "bernardo")));
+    CHECK(writeText(temp.path() + "other.3dsx", homebrew("Checkpoint", "Someone")));
+    CHECK(writeText(temp.path() + "renamed.3dsx", homebrew("Evil", "Bernardo")));
+    CHECK(writeText(temp.path() + "bare.3dsx", std::string(0x40, '\0')));
+    CHECK(writeText(temp.path() + "same.cia", homebrew("Checkpoint", "Bernardo")));
+    std::string name;
+    CHECK(remote::sameApp(temp.path() + "old.3dsx", temp.path() + "new.3dsx", &name));
+    CHECK_EQ(name, std::string("CHECKPOINT"));
+    CHECK(!remote::sameApp(temp.path() + "old.3dsx", temp.path() + "other.3dsx"));
+    CHECK(!remote::sameApp(temp.path() + "old.3dsx", temp.path() + "renamed.3dsx"));
+    // Files that say nothing about themselves match nothing, not even each
+    // other, and a CIA is never a 3dsx's update.
+    CHECK(!remote::sameApp(temp.path() + "bare.3dsx", temp.path() + "bare.3dsx"));
+    CHECK(!remote::sameApp(temp.path() + "old.3dsx", temp.path() + "same.cia"));
 }

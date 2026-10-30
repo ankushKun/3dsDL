@@ -57,13 +57,32 @@ private:
                                   std::string *message = nullptr);
     void finishDownload(const std::string &address, const std::string &folder,
                         const net::Result &result);
+    // How offerExtraction takes an archive a sender asked to extract
+    // (remote::sentExtraction): known is the listing as options will place
+    // it, which is shown and checked for clashes, and listing is the
+    // archive's own, which the extractors read. It goes into folder only,
+    // with no New Folder; the question starts on Not Now unless the console
+    // said yes before the download, and extracting runs once it is chosen.
+    // A sender never overwrites: what is already there is kept, and an app
+    // the archive updates goes in beside the old one, then replaceSent asks
+    // about it.
+    struct SentExtraction {
+        archives::Options options;
+        archives::Listing listing;
+        bool agreed = false;
+        // Called with true as extracting starts and false once it ends.
+        std::function<void(bool)> extracting;
+        std::string host;   // where the archive came from
+        std::string sender; // who sent it, as Receive names them
+    };
     // Asks where to extract an archive, then extracts it. known is a
     // listing already read, such as the archive viewer's.
     void offerExtraction(const std::string &path, const std::string &folder,
                          const std::string &summary,
                          const std::string &title =
                              "Download complete. Extract the archive?",
-                         const archives::Listing *known = nullptr);
+                         const archives::Listing *known = nullptr,
+                         const SentExtraction *sent = nullptr);
 
     // cia::readInfo, with a busy screen while a .zcia without Azahar's copy
     // of its name and icon decompresses its end for them. False with error
@@ -195,11 +214,39 @@ private:
         uint64_t id = 0;
         std::string url;
         std::string folder;
+        // The folder came from the link's sender (remote::SendOptions), so
+        // only what remote::sentFileAllowed allows is saved there, and only
+        // from host.
+        bool sent = false;
+        // Where the link led when Receive checked it before asking
+        // (net::whereTo); "" when it was not checked or could not be.
+        std::string host;
+        // Sent by a site other than 3dsDL's own page, so its download may
+        // not reach this network (remote::addressRefused).
+        bool foreign = false;
         State state = State::Waiting;
         std::string message; // why it failed
     };
     void addToQueue(const std::vector<std::string> &links,
-                    const std::string &folder, bool announce);
+                    const std::string &folder, bool announce,
+                    bool sent = false);
+    // Whether a sender's archive may go into its folder in /3ds/ (shown is
+    // the archive as placed): yes when that folder is not there yet or is
+    // empty, or when a 3dsx in the archive is the same app (remote::sameApp)
+    // as one in the folder or a folder in it. Each is taken out to a scratch
+    // file to compare, once the person chose Extract. Otherwise a sender
+    // could add files to another app's folder. NoRoom when the card cannot
+    // hold that scratch file; Stopped when the person stopped it.
+    enum class SameApp { Yes, No, Stopped, NoRoom };
+    SameApp sentFolderHoldsSameApp(const std::string &archive,
+                                   const SentExtraction &sent,
+                                   const archives::Listing &shown);
+    // Whether newer, which a sender's link or archive put beside older,
+    // takes its place: asked only for an update to the same app
+    // (remote::sameApp), starting on Keep Both; any other file keeps both
+    // without a question. True when newer replaced older.
+    bool replaceSent(const std::string &newer, const std::string &older,
+                     const std::string &host, const std::string &sender);
     void queueScreen();
     // How one link of a queue run went: Saved, Installed, Failed or
     // Cancelled.
@@ -210,6 +257,10 @@ private:
         std::string path;    // where it was saved, when it was
         uint64_t bytes = 0;
         std::string message; // why it failed
+        // The name the server gave it (name is what it was saved as, which
+        // differs after a clash), and its host after redirects.
+        std::string filename;
+        std::string host;
     };
     // Downloads the queued links in order, or only those in ids when given,
     // without stopping to ask. Finished ones leave the queue. With results,

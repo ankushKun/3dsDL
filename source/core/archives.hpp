@@ -50,6 +50,13 @@ enum class Scan {
 bool read(const std::string &path, Scan scan, Listing &listing,
           std::string &error, Observer *observer = nullptr);
 
+// The listing as Options::place would extract it, to show and to check
+// for clashes: each entry where place puts it, the ones it leaves out gone,
+// and the counts and top to match. It is not one to extract from.
+Listing placed(const Listing &listing,
+               const std::function<std::string(const std::string &path,
+                                               bool directory)> &place);
+
 // Relative paths of the listing's files already in folder. Reads each
 // folder once instead of looking up every file. observer sees
 // Progress::files and can stop it, which returns false.

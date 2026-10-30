@@ -78,4 +78,17 @@ Result commit(const std::string &partPath, const std::string &folder,
     return result;
 }
 
+std::string keptBeside(const std::string &path, const std::string &filename)
+{
+    const std::string older =
+        path.substr(0, path.find_last_of('/') + 1) + filename;
+    return !filename.empty() && older != path && fs::fileExists(older) ? older
+                                                                       : "";
+}
+
+bool replace(const std::string &path, const std::string &target)
+{
+    return fs::fileExists(path) && moveIntoPlace(path, target, true);
+}
+
 } // namespace finalize

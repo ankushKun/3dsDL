@@ -25,6 +25,11 @@ struct Received {
     // FBI's tools wait on this connection for one byte, sent by
     // finishReceived once the links are done. -1 for the web page.
     int replySocket = -1;
+    // What a sender to /send asked for besides the links.
+    remote::SendOptions options;
+    // Sent by 3dsDL's own page (remote::fromOwnPage) rather than by another
+    // site, which may have sent them without the person asking.
+    bool ownPage = false;
 };
 
 // Tells an FBI tool the links are done, so it can stop serving its files,
@@ -80,6 +85,11 @@ struct FileSharing {
     std::function<Access(const std::string &from, const std::string &device,
                          bool ask)>
         access;
+    // Whether links from an address are turned away before they reach the
+    // console, such as a device the console said Don't Allow to. A list of
+    // its own: answering the file question does not touch it. Unset takes
+    // links from everyone.
+    std::function<bool(const std::string &from)> refuseLinks;
     std::function<int64_t()> freeSpace;  // bytes, or -1 when unknown
     std::function<int64_t()> totalSpace; // bytes, or -1 when unknown
     // Unset reports "ready" with no text.

@@ -23,4 +23,13 @@ struct Result {
 Result commit(const std::string &partPath, const std::string &folder,
               const std::string &filename, bool overwrite, int64_t timestamp);
 
+// The file a download was kept beside: path is where commit put it
+// ("a (1).3dsx"), filename the name it came with ("a.3dsx"). The other
+// file's path while it is there, or "" when there was no clash.
+std::string keptBeside(const std::string &path, const std::string &filename);
+
+// Puts the file at path in place of target, as commit overwrites: the old
+// file is restored if the swap fails.
+bool replace(const std::string &path, const std::string &target);
+
 } // namespace finalize

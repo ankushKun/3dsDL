@@ -11,6 +11,7 @@
 #include "naming.hpp"
 #include "ntp.hpp"
 #include "platform.hpp"
+#include "remote.hpp"
 #include "savedata.hpp"
 #include "saves.hpp"
 #include "scanner.hpp"
@@ -28,6 +29,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <map>
+#include <set>
 
 namespace {
 
@@ -664,7 +666,8 @@ void App::finishDownload(const std::string &address, const std::string &folder,
 
 void App::offerExtraction(const std::string &path, const std::string &folder,
                           const std::string &summary, const std::string &title,
-                          const archives::Listing *known)
+                          const archives::Listing *known,
+                          const SentExtraction *sent)
 {
     archives::Listing read;
     std::string error;
@@ -698,9 +701,10 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
         holds += ", " + units::bytes(listing.archiveSize);
     }
     const std::string places =
-        single ? "Into: " + folder + listing.top +
-                     (listing.topIsFolder ? "/" : "")
-               : "Here: " + folder + "\nNew Folder: " + ownFolder;
+        single          ? "Into: " + folder + listing.top +
+                              (listing.topIsFolder ? "/" : "")
+        : sent != nullptr ? "Into: " + folder
+                          : "Here: " + folder + "\nNew Folder: " + ownFolder;
 
     ui::Dialog dialog;
     dialog.header = "extract";
@@ -708,12 +712,15 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
     dialog.tone = ui::Tone::Success;
     dialog.body.push_back({summary, ui::color::Muted, 0.44f, 3});
     dialog.body.push_back({holds + "\n" + places, ui::color::Text, 0.46f, 5});
-    if (single) {
+    if (single || sent != nullptr) {
         dialog.buttons = {"Extract", "Not Now"};
         dialog.cancelButton = 1;
     } else {
         dialog.buttons = {"Here", "New Folder", "Not Now"};
         dialog.cancelButton = 2;
+    }
+    if (sent != nullptr && !sent->agreed) {
+        dialog.initial = dialog.cancelButton;
     }
     const int choice = ui::choose(dialog);
     if (choice < 0 || choice == dialog.cancelButton) {
@@ -725,7 +732,40 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
                                    ? folder + listing.top + "/"
                                    : target;
 
-    archives::Options options;
+    if (sent != nullptr) {
+        if (sent->extracting) {
+            sent->extracting(true);
+        }
+        const SameApp same = sentFolderHoldsSameApp(path, *sent, listing);
+        if (sent->extracting) {
+            sent->extracting(false);
+        }
+        if (same != SameApp::Yes) {
+            logging::warn("extract.refused",
+                          {{"file", basename(path)},
+                           {"why", same == SameApp::No       ? "folder"
+                                   : same == SameApp::NoRoom ? "space"
+                                                             : "stopped"}});
+        }
+        if (same == SameApp::No) {
+            ui::message("Not Extracted",
+                        "A sent archive only adds to a folder in /3ds/ that "
+                        "holds the same app.",
+                        ui::Tone::Warning, summary);
+            return;
+        }
+        if (same == SameApp::NoRoom) {
+            ui::message("Not enough free space",
+                        "The SD card is too full to check the archive.",
+                        ui::Tone::Error, summary);
+            return;
+        }
+        if (same == SameApp::Stopped) {
+            return;
+        }
+    }
+    archives::Options options =
+        sent != nullptr ? sent->options : archives::Options();
     // Without a full listing the archive's own size is the least it needs.
     const uint64_t needed =
         listing.complete
@@ -742,6 +782,9 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
                     ui::Tone::Error);
         return;
     }
+    // For a sender's archive: an app already where an entry lands, to the
+    // name the archive's copy goes in under beside it.
+    std::map<std::string, std::string> beside;
     if (listing.complete) {
         std::vector<std::string> clashes;
         if (fs::directoryExists(target)) {
@@ -769,7 +812,44 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
                 return;
             }
         }
-        if (!clashes.empty()) {
+        if (sent != nullptr) {
+            // A sender never overwrites: an app it updates goes in beside
+            // the one there, to be asked about once extracted, and anything
+            // else already there is kept.
+            options.existing = archives::Existing::Skip;
+            std::set<std::string> taken;
+            for (const archives::Entry &entry : listing.entries) {
+                taken.insert(text::lower(entry.path));
+            }
+            for (const std::string &clash : clashes) {
+                if (!remote::sentMayReplace(basename(clash))) {
+                    continue;
+                }
+                const std::string within =
+                    clash.substr(0, clash.find_last_of('/') + 1);
+                const std::string free = naming::unusedPath(
+                    target + within, basename(clash),
+                    [&](const std::string &candidate) {
+                        return fs::fileExists(candidate) ||
+                               taken.count(text::lower(
+                                   candidate.substr(target.size()))) > 0;
+                    });
+                if (!free.empty()) {
+                    beside[clash] = free.substr(target.size());
+                    taken.insert(text::lower(beside[clash]));
+                }
+            }
+            if (!beside.empty()) {
+                const auto place = options.place;
+                options.place = [place, beside](const std::string &path,
+                                                bool directory) {
+                    const std::string placed = place(path, directory);
+                    const auto found =
+                        directory ? beside.end() : beside.find(placed);
+                    return found != beside.end() ? found->second : placed;
+                };
+            }
+        } else if (!clashes.empty()) {
             ui::Dialog question;
             question.header = "extract";
             question.title = clashes.size() == 1
@@ -793,9 +873,18 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
         }
     }
 
+    if (sent != nullptr && sent->extracting) {
+        sent->extracting(true);
+    }
     const uint64_t started = osGetTime();
-    const archives::Result result = tasks::extract(path, listing, target,
+    // A sender's archive is extracted from its own listing; listing here is
+    // where its entries go.
+    const archives::Listing &source = sent != nullptr ? sent->listing : listing;
+    const archives::Result result = tasks::extract(path, source, target,
                                                    options);
+    if (sent != nullptr && sent->extracting) {
+        sent->extracting(false);
+    }
     const uint64_t seconds = (osGetTime() - started) / 1000;
     if (options.existing == archives::Existing::Overwrite) {
         // Files replaced at the same size would keep their old dates.
@@ -831,11 +920,27 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
         notes += plural(result.skippedUnsupported, "entry") +
                  " skipped (encrypted, a link or unknown compression). ";
     }
+    if (result.skippedPlaced > 0) {
+        notes += plural(result.skippedPlaced, "file") +
+                 " left out of a sent archive. ";
+    }
+    for (const auto &app : beside) {
+        const std::string newer = target + app.second;
+        if (!fs::fileExists(newer)) {
+            continue;
+        }
+        notes += replaceSent(newer, target + app.first, sent->host, sent->sender)
+                     ? basename(app.first) + " updated. "
+                     : basename(app.second) + " kept beside " +
+                           basename(app.first) + ". ";
+    }
 
     // Without a full listing nothing could be asked before, so what was
-    // already there can be replaced now.
-    const bool offerReplace =
-        !listing.complete && !result.skippedExisting.empty();
+    // already there can be replaced now. Never for a sender's archive: its
+    // listing is always full, and the paths skipped here are where place
+    // put them, which only would not match.
+    const bool offerReplace = sent == nullptr && !listing.complete &&
+                              !result.skippedExisting.empty();
     ui::Dialog done;
     done.header = "done";
     done.title = "The archive has been extracted.";
@@ -864,7 +969,7 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
     }
     options.existing = archives::Existing::Overwrite;
     options.only = result.skippedExisting;
-    const archives::Result replaced = tasks::extract(path, listing, target,
+    const archives::Result replaced = tasks::extract(path, source, target,
                                                      options);
     fileIndex_.rewritten(landed);
     sdChanged(target);

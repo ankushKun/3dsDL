@@ -114,4 +114,118 @@ FetchResult fetch(const FetchRequest &request)
     return result;
 }
 
+namespace {
+
+struct Probe {
+    const FetchRequest *request;
+    bool answered = false;
+    bool refused = false;
+};
+
+// Turns away a connection request.refuse names, before it is asked anything.
+int probePrerequest(void *user, char *to, char *from, int, int)
+{
+    Probe &probe = *static_cast<Probe *>(user);
+    if (probe.request->refuse(to != nullptr ? to : "", from != nullptr ? from : "")) {
+        probe.refused = true;
+        return CURL_PREREQFUNC_ABORT;
+    }
+    return CURL_PREREQFUNC_OK;
+}
+
+// Stops at the first byte of the answer, once the redirects are behind it.
+size_t stopAtFirstByte(char *, size_t, size_t, void *user)
+{
+    static_cast<Probe *>(user)->answered = true;
+    return 0; // makes libcurl stop with CURLE_WRITE_ERROR
+}
+
+int probeProgress(void *user, curl_off_t, curl_off_t, curl_off_t, curl_off_t)
+{
+    const std::atomic<bool> *cancel = static_cast<Probe *>(user)->request->cancel;
+    return cancel != nullptr && cancel->load() ? 1 : 0;
+}
+
+} // namespace
+
+Destination whereTo(const FetchRequest &request)
+{
+    Destination result;
+    CURL *curl = curl_easy_init();
+    if (curl == nullptr) {
+        result.message = "The network library could not start a request.";
+        return result;
+    }
+    Probe probe;
+    probe.request = &request;
+    char errorBuffer[CURL_ERROR_SIZE] = {};
+    curl_slist *headers = nullptr;
+    for (const std::string &header : request.headers) {
+        headers = curl_slist_append(headers, header.c_str());
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
+    if (!request.userAgent.empty()) {
+        curl_easy_setopt(curl, CURLOPT_USERAGENT, request.userAgent.c_str());
+    }
+    if (headers != nullptr) {
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, headers);
+    }
+    // A GET, as the download will be: some servers redirect only those.
+    curl_easy_setopt(curl, CURLOPT_RANGE, "0-0");
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_MAXREDIRS, MaxRedirects);
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, request.connectTimeoutSeconds);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, request.totalTimeoutSeconds);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    useLocalClock(curl);
+    if (!request.caFile.empty()) {
+        curl_easy_setopt(curl, CURLOPT_CAINFO, request.caFile.c_str());
+    }
+    curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, stopAtFirstByte);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &probe);
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, probeProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &probe);
+    if (request.refuse) {
+        curl_easy_setopt(curl, CURLOPT_PREREQFUNCTION, probePrerequest);
+        curl_easy_setopt(curl, CURLOPT_PREREQDATA, &probe);
+    }
+
+    const CURLcode code = curl_easy_perform(curl);
+    long status = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status);
+    char *effective = nullptr;
+    curl_easy_getinfo(curl, CURLINFO_EFFECTIVE_URL, &effective);
+    if (effective != nullptr) {
+        result.url = effective;
+    }
+    curl_slist_free_all(headers);
+    curl_easy_cleanup(curl);
+
+    if (probe.refused) {
+        result.refused = true;
+        result.message = "The link leads to an address on this network.";
+        return result;
+    }
+    if (code == CURLE_ABORTED_BY_CALLBACK) {
+        result.cancelled = true;
+        result.message = "Cancelled.";
+        return result;
+    }
+    // An empty answer ends without a byte; one with a body ends at it.
+    result.ok = !result.url.empty() &&
+                (code == CURLE_OK || (code == CURLE_WRITE_ERROR && probe.answered));
+    if (!result.ok) {
+        result.message = describeFailure(static_cast<int>(code), status, errorBuffer);
+    }
+    return result;
+}
+
 } // namespace net
