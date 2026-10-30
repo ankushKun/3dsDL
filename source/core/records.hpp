@@ -43,6 +43,8 @@ struct Settings {
     // UTC offset used when setting the clock from the internet.
     bool timeZoneSet = false;
     int timeZoneMinutes = 0;
+    // Files' favourites, as favorites.hpp keeps them.
+    std::vector<std::string> favorites;
 };
 
 Settings parseSettings(const std::string &contents);

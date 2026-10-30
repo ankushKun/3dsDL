@@ -1,5 +1,7 @@
 #include "records.hpp"
 
+#include "favorites.hpp"
+#include "naming.hpp"
 #include "text.hpp"
 #include "timezone.hpp"
 
@@ -223,6 +225,9 @@ Settings parseSettings(const std::string &contents)
                 settings.timeZoneSet = true;
                 settings.timeZoneMinutes = static_cast<int>(minutes);
             }
+        } else if (key == "favorite" && naming::isSdPath(value) &&
+                   !favorites::contains(settings.favorites, value)) {
+            settings.favorites.push_back(value);
         }
     });
     return settings;
@@ -254,6 +259,9 @@ std::string serializeSettings(const Settings &settings)
     if (settings.timeZoneSet) {
         output += "time_zone_minutes=" +
                   std::to_string(settings.timeZoneMinutes) + "\n";
+    }
+    for (const std::string &favorite : settings.favorites) {
+        output += "favorite=" + text::singleLine(favorite) + "\n";
     }
     return output;
 }
