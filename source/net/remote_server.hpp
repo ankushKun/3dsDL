@@ -85,6 +85,11 @@ struct FileSharing {
     std::function<Access(const std::string &from, const std::string &device,
                          bool ask)>
         access;
+    // Whether links from an address are turned away before they reach the
+    // console, such as a device the console said Don't Allow to. A list of
+    // its own: answering the file question does not touch it. Unset takes
+    // links from everyone.
+    std::function<bool(const std::string &from)> refuseLinks;
     std::function<int64_t()> freeSpace;  // bytes, or -1 when unknown
     std::function<int64_t()> totalSpace; // bytes, or -1 when unknown
     // Unset reports "ready" with no text.

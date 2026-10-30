@@ -634,7 +634,7 @@ const go = path => { location.hash = '#files:' + enc(path); };
 addEventListener('hashchange', route);
 
 // --- Links ------------------------------------------------------------------------
-function linksIn(text) { return [...new Set((text.match(/https?:\/\/[^\s<>"'()]+/g) || []).map(l => l.replace(/[.,;]+$/, '')))]; }
+function linksIn(text) { return [...new Set((text.match(/https?:\/\/[^\s<>"'()]+/gi) || []).map(l => l.replace(/[.,;]+$/, '')))]; }
 function linkName(l) { try { return decodeURIComponent(base(new URL(l).pathname)) || new URL(l).host; } catch (e) { return l; } }
 $('#sendform').noValidate = true;
 $('#linkbox').addEventListener('input', () => {

@@ -823,7 +823,7 @@ TEST("archives: place sees the name a ZIP's entry is written under")
                          listing, error));
     CHECK(!listing.ownZip);
     // The listing has the central directory's names; libarchive reads the
-    // local header's, luma/plugin.3gx, for the first entry.
+    // local header's, 3ds/a/zzzz.3dsx, for the first entry.
     CHECK_EQ(listing.entries.size(), static_cast<size_t>(2));
     CHECK_EQ(listing.entries[0].path, std::string("3ds/a/abcd.3dsx"));
 
@@ -836,17 +836,18 @@ TEST("archives: place sees the name a ZIP's entry is written under")
                                   listed);
     CHECK(result.ok);
     CHECK_EQ(result.extracted, 1u);
-    CHECK(!fs::directoryExists(folder.path() + "luma"));
+    CHECK(!fs::fileExists(folder.path() + "3ds/a/zzzz.3dsx"));
     CHECK(!fs::fileExists(folder.path() + "3ds/a/abcd.3dsx"));
     CHECK_EQ(readText(folder.path() + "3ds/a/bz.txt"),
              std::string("packed with bzip2\n"));
 
+    // place alone sees only the local header's name, so it would let one
+    // the listing never showed through: why a sender's ZIP also sets only.
     TempDir placed;
     result = runUnder(fixture("renamed.zip"), listing, placed.path(), "3ds/");
     CHECK(result.ok);
-    CHECK_EQ(result.extracted, 1u);
-    CHECK_EQ(result.skippedPlaced, 1u);
-    CHECK(!fs::directoryExists(placed.path() + "luma"));
+    CHECK_EQ(result.extracted, 2u);
+    CHECK(fs::fileExists(placed.path() + "a/zzzz.3dsx"));
     CHECK_EQ(readText(placed.path() + "a/bz.txt"),
              std::string("packed with bzip2\n"));
 }
@@ -892,7 +893,9 @@ TEST("archives: a sender's archive is extracted into its one folder only")
     result = archives::extract(fixture("renamed.zip"), listing,
                                renamed.path(), options, observer);
     CHECK(result.ok);
-    CHECK(!fs::directoryExists(renamed.path() + "luma"));
+    CHECK_EQ(result.extracted, 1u);
+    CHECK(!fs::fileExists(renamed.path() + "a/zzzz.3dsx"));
+    CHECK(!fs::fileExists(renamed.path() + "a/abcd.3dsx"));
     CHECK_EQ(readText(renamed.path() + "a/bz.txt"),
              std::string("packed with bzip2\n"));
 

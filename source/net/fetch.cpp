@@ -119,7 +119,19 @@ namespace {
 struct Probe {
     const FetchRequest *request;
     bool answered = false;
+    bool refused = false;
 };
+
+// Turns away a connection request.refuse names, before it is asked anything.
+int probePrerequest(void *user, char *to, char *from, int, int)
+{
+    Probe &probe = *static_cast<Probe *>(user);
+    if (probe.request->refuse(to != nullptr ? to : "", from != nullptr ? from : "")) {
+        probe.refused = true;
+        return CURL_PREREQFUNC_ABORT;
+    }
+    return CURL_PREREQFUNC_OK;
+}
 
 // Stops at the first byte of the answer, once the redirects are behind it.
 size_t stopAtFirstByte(char *, size_t, size_t, void *user)
@@ -181,6 +193,10 @@ Destination whereTo(const FetchRequest &request)
     curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
     curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, probeProgress);
     curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &probe);
+    if (request.refuse) {
+        curl_easy_setopt(curl, CURLOPT_PREREQFUNCTION, probePrerequest);
+        curl_easy_setopt(curl, CURLOPT_PREREQDATA, &probe);
+    }
 
     const CURLcode code = curl_easy_perform(curl);
     long status = 0;
@@ -193,6 +209,11 @@ Destination whereTo(const FetchRequest &request)
     curl_slist_free_all(headers);
     curl_easy_cleanup(curl);
 
+    if (probe.refused) {
+        result.refused = true;
+        result.message = "The link leads to an address on this network.";
+        return result;
+    }
     if (code == CURLE_ABORTED_BY_CALLBACK) {
         result.cancelled = true;
         result.message = "Cancelled.";

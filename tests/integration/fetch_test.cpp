@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdlib>
+#include <vector>
 
 // Runs net::fetch against tests/fixtures/server.py.
 
@@ -114,6 +115,24 @@ TEST("fetch: whereTo follows redirects as a download would")
     destination = net::whereTo(request);
     CHECK(!destination.ok);
     CHECK(!destination.message.empty());
+
+    // An address the rule turns away, after a redirect too, is not asked.
+    request.url = fixture("FIXTURE_HTTP") + "/redirect/2";
+    request.caFile.clear();
+    std::vector<std::string> seen;
+    request.refuse = [&](const std::string &to, const std::string &from) {
+        seen.push_back(to);
+        CHECK(!from.empty());
+        return to == "127.0.0.1";
+    };
+    destination = net::whereTo(request);
+    CHECK(!destination.ok);
+    CHECK(destination.refused);
+    CHECK(!destination.cancelled);
+    CHECK_EQ(seen.size(), static_cast<size_t>(1));
+    request.refuse = [](const std::string &, const std::string &) { return false; };
+    CHECK(net::whereTo(request).ok);
+    request.refuse = nullptr;
 
     std::atomic<bool> cancel {true};
     request.url = fixture("FIXTURE_HTTP") + "/file/400000?slow=1";

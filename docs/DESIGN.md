@@ -169,7 +169,7 @@ strip for a red button and a 30 px dark Cancel strip.
 | Received row | the row's name and facts | Install, Install and Delete File, Show in Files |
 | Sent links | names and the host each link leads to after its redirects, who sent them, where they go | dialog: Download / Add to Queue / Cancel, starting on Cancel unless 3dsDL's own page sent them; Don't Allow in place of Add to Queue once a device's links were cancelled |
 | Sent replace | the file, its host, the sender, the app, its folder and the name the new one was kept as | dialog: Keep Both / Replace, starting on Keep Both; only for the same app |
-| Sent extract | what the archive holds and the one folder in /3ds/ it goes into | dialog: Extract / Not Now, starting on Not Now unless the console said yes before the download |
+| Sent extract | what the archive holds, the one folder in /3ds/ it goes into, and the new files it adds to a folder already there | dialog: Extract / Not Now, starting on Not Now unless the console said yes before the download |
 | Settings | the highlighted section's current values | About and Updates bars, four tiles, Back / Report Issue |
 | Report an Issue | QR code, name and address of the highlighted place | Report a Bug, Discord Server, Developer on X; the Details row to mention, and the Crash Log row when there is one; Back |
 | Setting choice | the setting's icon | recessed options, the current one chosen |

@@ -468,6 +468,19 @@ bool isTransient(CURLcode code, long httpStatus)
     }
 }
 
+// Turns away a connection Request::refuse names, before it is asked anything.
+int prerequestCallback(void *user, char *to, char *from, int, int)
+{
+    Connection &connection = *static_cast<Connection *>(user);
+    Transfer &transfer = *connection.transfer;
+    if (transfer.request->refuse(to != nullptr ? to : "",
+                                 from != nullptr ? from : "")) {
+        transfer.failure = "The link leads to an address on this network.";
+        return CURL_PREREQFUNC_ABORT;
+    }
+    return CURL_PREREQFUNC_OK;
+}
+
 void configure(Transfer &transfer, Connection &connection)
 {
     const Request &request = *transfer.request;
@@ -512,6 +525,10 @@ void configure(Transfer &transfer, Connection &connection)
     if (request.socketBufferSize > 0) {
         curl_easy_setopt(curl, CURLOPT_SOCKOPTFUNCTION, sockoptCallback);
         curl_easy_setopt(curl, CURLOPT_SOCKOPTDATA, &transfer);
+    }
+    if (request.refuse) {
+        curl_easy_setopt(curl, CURLOPT_PREREQFUNCTION, prerequestCallback);
+        curl_easy_setopt(curl, CURLOPT_PREREQDATA, &connection);
     }
 
     if (request.maxFileSize > piece.next) {

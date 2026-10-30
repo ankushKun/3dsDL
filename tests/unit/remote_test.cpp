@@ -429,7 +429,7 @@ TEST("remote: a sender's folder keeps only apps and archives")
     }
     for (const char *moved : {"config.ini", "cheats.json", "script.lua",
                               "plugin.3gx", "boot.firm", "save.bin", "boot.3dsx",
-                              "3dsDL.3dsx", "APP~1.3DS", "ap\xc3\xa9.3dsx", ""}) {
+                              "3dsDL.3dsx", "APP~1.CIA", "app.3dsx ", "app.cia.", "ap\xc3\xa9.3dsx", ""}) {
         CHECK(!remote::sentFileAllowed(moved));
     }
 }
@@ -465,4 +465,43 @@ TEST("remote: a send carries at most 20 links")
                                options, why));
     CHECK(why.find("20") != std::string::npos);
     CHECK(options.folder.empty());
+}
+
+TEST("remote: a link never reaches the console, nor another site's this network")
+{
+    // The console itself, by any address, for anyone.
+    for (const char *self : {"127.0.0.1", "127.8.9.1", "0.0.0.0", "::1",
+                             "::ffff:127.0.0.1"}) {
+        CHECK(remote::addressRefused(self, "192.168.1.20", false));
+    }
+    CHECK(remote::addressRefused("192.168.1.20", "192.168.1.20", false));
+    // Private networks only for a link another site sent.
+    for (const char *lan : {"192.168.1.1", "10.0.0.5", "172.16.0.1",
+                            "172.31.255.255", "169.254.1.1", "100.64.0.1",
+                            "224.0.0.251", "255.255.255.255", "fd00::1",
+                            "fe80::1", "::ffff:10.1.2.3"}) {
+        CHECK(!remote::addressRefused(lan, "192.168.1.20", false));
+        CHECK(remote::addressRefused(lan, "192.168.1.20", true));
+    }
+    for (const char *open : {"140.82.112.4", "172.32.0.1", "11.0.0.1",
+                             "2606:4700::1111", ""}) {
+        CHECK(!remote::addressRefused(open, "192.168.1.20", true));
+    }
+}
+
+TEST("remote: a sender's loose file in /3ds/ is an app or nothing")
+{
+    archives::Listing listing;
+    archives::Options options;
+    archives::Listing shown;
+    remote::SentArchive archive;
+    CHECK(remote::sentArchive({"3ds/App.3dsx"}, "a.zip", archive));
+    CHECK(remote::sentArchive({"3ds/game.cia"}, "a.zip", archive));
+    CHECK(!remote::sentArchive({"3ds/shortcut.xml"}, "a.zip", archive));
+    CHECK(!remote::sentArchive({"3ds/x.lua"}, "a.zip", archive));
+    // In a folder, any file goes, as apps carry their own.
+    CHECK(remote::sentArchive({"3ds/App/", "3ds/App/config.xml"}, "a.zip", archive));
+    // A folder whose name ends in a space or dot is another name to FAT.
+    CHECK(!remote::sentArchive({"3ds/3dsDL /settings.ini"}, "a.zip", archive));
+    CHECK(!remote::sendFolderAllowed("sdmc:/3ds/3dsDL."));
 }

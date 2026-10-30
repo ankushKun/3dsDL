@@ -135,3 +135,14 @@ TEST("naming: an archive's folder name drops .tar too")
     CHECK_EQ(naming::archiveStem("pack.tgz"), std::string("pack"));
     CHECK_EQ(naming::archiveStem("v1.2.7z"), std::string("v1.2"));
 }
+
+TEST("naming: a long name cut short never ends in a space or dot")
+{
+    const std::string spaced = "3dsDL.3dsx" + std::string(200, ' ') + "x";
+    const std::string safe = naming::safeFilename(spaced);
+    CHECK(!safe.empty());
+    CHECK(safe.back() != ' ' && safe.back() != '.');
+    const std::string dotted = std::string(170, 'a') + std::string(40, '.') + "b";
+    const std::string cut = naming::safeFilename(dotted);
+    CHECK(cut.back() != ' ' && cut.back() != '.');
+}

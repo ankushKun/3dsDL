@@ -895,10 +895,15 @@ TEST("remote server: what a sender asks for comes with its links")
 
 TEST("remote server: a send says if 3dsDL's page made it, holds 20 links, and a turned-down device is refused")
 {
-    net::Access access = net::Access::Allowed;
+    bool turnedAway = false;
     net::FileSharing sharing;
+    // Turning down file access is a list of its own.
     sharing.access = [&](const std::string &, const std::string &, bool) {
-        return access;
+        return net::Access::Denied;
+    };
+    sharing.refuseLinks = [&](const std::string &from) {
+        CHECK_EQ(from, std::string("127.0.0.1"));
+        return turnedAway;
     };
     net::Receiver receiver;
     std::string error;
@@ -947,8 +952,16 @@ TEST("remote server: a send says if 3dsDL's page made it, holds 20 links, and a 
     CHECK(response.rfind("HTTP/1.1 400", 0) == 0);
     CHECK(response.find("at most 20") != std::string::npos);
 
+    // The page is told why, as JSON.
+    client = post("Host: 127.0.0.1\r\nX-Requested-With: 3dsDL\r\n",
+                  links + "https%3A%2F%2Fexample.com%2F20.3dsx");
+    CHECK(!receiver.wait(1000, refused));
+    response = readAll(client);
+    ::close(client);
+    CHECK(response.find("{\"error\":\"Send at most 20") != std::string::npos);
+
     // A device the console turned down sends nothing more.
-    access = net::Access::Denied;
+    turnedAway = true;
     client = post("Host: 127.0.0.1\r\nX-Requested-With: 3dsDL\r\n", one);
     CHECK(!receiver.wait(1000, refused));
     CHECK(refused.links.empty());

@@ -213,6 +213,9 @@ private:
         // Where the link led when Receive checked it before asking
         // (net::whereTo); "" when it was not checked or could not be.
         std::string host;
+        // Sent by a site other than 3dsDL's own page, so its download may
+        // not reach this network (remote::addressRefused).
+        bool foreign = false;
         State state = State::Waiting;
         std::string message; // why it failed
     };
@@ -221,12 +224,15 @@ private:
                     bool sent = false);
     // Whether a sender's archive may go into its folder in /3ds/ (shown is
     // the archive as placed): yes when that folder is not there yet or is
-    // empty, or when it holds a 3dsx where the archive has one of the same
-    // app (remote::sameApp), which is taken out to a scratch file to
-    // compare. Otherwise a sender could add files to another app's folder.
-    bool sentFolderHoldsSameApp(const std::string &archive,
-                                const SentExtraction &sent,
-                                const archives::Listing &shown);
+    // empty, or when a 3dsx in the archive is the same app (remote::sameApp)
+    // as one in the folder or a folder in it. Each is taken out to a scratch
+    // file to compare, once the person chose Extract. Otherwise a sender
+    // could add files to another app's folder. NoRoom when the card cannot
+    // hold that scratch file; Stopped when the person stopped it.
+    enum class SameApp { Yes, No, Stopped, NoRoom };
+    SameApp sentFolderHoldsSameApp(const std::string &archive,
+                                   const SentExtraction &sent,
+                                   const archives::Listing &shown);
     // Whether newer, which a sender's link or archive put beside older,
     // takes its place: asked only for an update to the same app
     // (remote::sameApp), starting on Keep Both; any other file keeps both

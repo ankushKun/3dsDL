@@ -116,6 +116,15 @@ bool localPath(const std::string &root, const std::string &webPath,
 // without the person asking.
 bool fromOwnPage(const HttpRequest &request);
 
+// Whether a link may not connect to the address to (the IP a connection
+// reached, as text) from from (the console's end of it): never the console
+// itself or a loopback address, and with privateToo nothing on a private
+// network either (10/8, 172.16/12, 192.168/16, link-local, carrier-grade
+// NAT, multicast and their IPv6 kinds), which a link another site sent has
+// no business reaching.
+bool addressRefused(const std::string &to, const std::string &from,
+                    bool privateToo);
+
 // The most links one /send may carry, from any page.
 constexpr size_t MaxSentLinks = 20;
 

@@ -1252,15 +1252,17 @@ bool Receiver::serveWeb(int client, const std::string &from, Received &out)
             request.method == "POST" ? request.body : request.query;
         // A device the console turned down sends nothing more until
         // Receive closes.
-        if (sharing_.access &&
-            sharing_.access(from, deviceOf(request), false) == Access::Denied) {
+        if (sharing_.refuseLinks && sharing_.refuseLinks(from)) {
             sendAll(client, remote::jsonError(403, "The 3DS did not allow this device."));
             closeClient(client);
             return false;
         }
         std::string why;
         if (!remote::sendOptions(form, out.options, why)) {
-            sendAll(client, remote::httpResponse(400, "text/plain", why + "\n"));
+            // The page reads JSON; a plain form or another site, text.
+            sendAll(client, remote::fromOwnPage(request)
+                                ? remote::jsonError(400, why)
+                                : remote::httpResponse(400, "text/plain", why + "\n"));
             closeClient(client);
             return false;
         }

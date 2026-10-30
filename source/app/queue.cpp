@@ -101,6 +101,11 @@ struct ReceiveJob {
     std::deque<Asker> asking;
     std::set<std::string> allowed;
     std::set<std::string> denied;
+    // Devices whose links Don't Allow turned away, a list of their own.
+    std::set<std::string> linksDenied;
+    // The console's own address: it never sends itself links or asks
+    // itself for files, which a link pointing back at it would.
+    std::string self;
     // Progress reports and the paths the page changed, in order, until the
     // screen takes them.
     std::deque<net::Transfer> reports;
@@ -145,10 +150,48 @@ struct ReceiveJob {
         LightLock_Unlock(&lock);
     }
 
+    bool fromConsole(const std::string &from) const
+    {
+        return from == self || from.rfind("127.", 0) == 0;
+    }
+
+    // Runs on the listener's thread.
+    bool refusesLinks(const std::string &from)
+    {
+        LightLock_Lock(&lock);
+        const bool refused = fromConsole(from) || linksDenied.count(from) != 0;
+        LightLock_Unlock(&lock);
+        return refused;
+    }
+
+    // Turns a device's links away until Receive closes, those already
+    // waiting included.
+    void denyLinks(const std::string &from)
+    {
+        std::deque<net::Received> dropped;
+        LightLock_Lock(&lock);
+        linksDenied.insert(from);
+        for (auto at = arrived.begin(); at != arrived.end();) {
+            if (at->from == from && !at->links.empty() && at->replySocket < 0) {
+                dropped.push_back(*at);
+                at = arrived.erase(at);
+            } else {
+                ++at;
+            }
+        }
+        LightLock_Unlock(&lock);
+        for (net::Received &received : dropped) {
+            net::finishReceived(received);
+        }
+    }
+
     // Runs on the listener's thread.
     net::Access access(const std::string &from, const std::string &device,
                        bool ask)
     {
+        if (fromConsole(from)) {
+            return net::Access::Denied;
+        }
         LightLock_Lock(&lock);
         net::Access result = net::Access::Pending;
         const bool waiting =
@@ -607,28 +650,49 @@ bool App::replaceSent(const std::string &newer, const std::string &older,
     return true;
 }
 
-bool App::sentFolderHoldsSameApp(const std::string &archive,
-                                 const SentExtraction &sent,
-                                 const archives::Listing &shown)
+App::SameApp App::sentFolderHoldsSameApp(const std::string &archive,
+                                         const SentExtraction &sent,
+                                         const archives::Listing &shown)
 {
     const std::string folder = std::string(remote::ArchiveTarget) + shown.top + "/";
     if (!shown.topIsFolder || !fs::directoryExists(folder) ||
         fs::listEntries(folder, nullptr, true, false).empty()) {
-        return true;
+        return SameApp::Yes;
     }
-    // A 3dsx the archive has where the folder has one: taken out on its own
-    // to compare, as the archive's listing says nothing about what is in it.
+    // The apps the folder holds, in it or one folder down.
+    std::vector<std::string> theirs;
+    for (const fs::Entry &entry : fs::listEntries(folder, nullptr, true, false)) {
+        if (!entry.folder && filetype::fromName(entry.name) == filetype::Kind::Homebrew) {
+            theirs.push_back(folder + entry.name);
+        } else if (entry.folder) {
+            for (const fs::Entry &inner :
+                 fs::listEntries(folder + entry.name + "/", nullptr, true, false)) {
+                if (!inner.folder &&
+                    filetype::fromName(inner.name) == filetype::Kind::Homebrew) {
+                    theirs.push_back(folder + entry.name + "/" + inner.name);
+                }
+            }
+        }
+    }
+    if (theirs.empty()) {
+        return SameApp::No;
+    }
+    // Each 3dsx in the archive is taken out on its own to compare, as its
+    // listing says nothing about what it is; a few are enough.
     const std::string scratch = std::string(storage::DataFolder) + "check/";
+    size_t tried = 0;
     for (const archives::Entry &entry : sent.listing.entries) {
-        if (entry.directory || entry.path.empty()) {
+        if (entry.directory || entry.path.empty() || tried >= 4) {
             continue;
         }
         const std::string placed = sent.options.place(entry.path, false);
-        const std::string there = std::string(remote::ArchiveTarget) + placed;
-        if (placed.empty() ||
-            filetype::fromName(placed) != filetype::Kind::Homebrew ||
-            !fs::fileExists(there)) {
+        if (placed.empty() || filetype::fromName(placed) != filetype::Kind::Homebrew) {
             continue;
+        }
+        ++tried;
+        const int64_t free = platform::sdFreeBytes();
+        if (free >= 0 && entry.size + (1u << 20) > static_cast<uint64_t>(free)) {
+            return SameApp::NoRoom;
         }
         archives::Options one;
         one.only = {entry.path};
@@ -638,15 +702,21 @@ bool App::sentFolderHoldsSameApp(const std::string &archive,
         };
         const archives::Result taken =
             tasks::extract(archive, sent.listing, scratch, one);
-        const bool same = taken.ok && taken.extracted == 1 &&
-                          remote::sameApp(there, scratch + "app.3dsx");
+        bool same = false;
+        for (const std::string &app : theirs) {
+            same = same || (taken.ok && taken.extracted == 1 &&
+                            remote::sameApp(app, scratch + "app.3dsx"));
+        }
         fs::removeFolderTree(scratch);
         sdChanged(scratch);
+        if (taken.cancelled) {
+            return SameApp::Stopped;
+        }
         if (same) {
-            return true;
+            return SameApp::Yes;
         }
     }
-    return false;
+    return SameApp::No;
 }
 
 void App::addToQueue(const std::vector<std::string> &links,
@@ -727,9 +797,13 @@ void App::runQueue(const std::vector<uint64_t> *ids,
             continue;
         }
         QueuedLink item = *found;
-        if (!fs::makeDirectories(item.folder)) {
+        // A sender's link downloads into the Download Folder and moves into
+        // the sender's folder only once it is known to belong there, so
+        // nothing else is made or left in it.
+        const std::string downloadTo = item.sent ? settings_.destination : item.folder;
+        if (!fs::makeDirectories(downloadTo)) {
             found->state = QueuedLink::State::Failed;
-            found->message = "Could not create " + item.folder + ".";
+            found->message = "Could not create " + downloadTo + ".";
             report(item.url, HistoryStatus::Failed, "", "", 0, found->message);
             ++failed;
             continue;
@@ -737,7 +811,13 @@ void App::runQueue(const std::vector<uint64_t> *ids,
 
         net::Request request;
         request.url = item.url;
-        request.folder = item.folder;
+        request.folder = downloadTo;
+        // Never the console itself, and for a link another site sent,
+        // nothing on this network.
+        request.refuse = [foreign = item.foreign](const std::string &to,
+                                                  const std::string &from) {
+            return remote::addressRefused(to, from, foreign);
+        };
         request.caFile = http::CaBundle;
         request.userAgent = http::UserAgent;
         request.allowResume = settings_.resumeDownloads;
@@ -758,7 +838,7 @@ void App::runQueue(const std::vector<uint64_t> *ids,
             found->state = QueuedLink::State::Stopped;
             found->message = "Stopped.";
             HistoryEntry stoppedEntry = historyEntry(
-                item.url, item.folder, HistoryStatus::Cancelled, result.message);
+                item.url, downloadTo, HistoryStatus::Cancelled, result.message);
             stoppedEntry.name = result.filename;
             record(stoppedEntry);
             report(item.url, HistoryStatus::Cancelled, result.filename, "",
@@ -769,7 +849,7 @@ void App::runQueue(const std::vector<uint64_t> *ids,
         if (result.outcome != net::Outcome::Completed) {
             found->state = QueuedLink::State::Failed;
             found->message = result.message;
-            HistoryEntry entry = historyEntry(item.url, item.folder,
+            HistoryEntry entry = historyEntry(item.url, downloadTo,
                                               HistoryStatus::Failed,
                                               result.message);
             entry.resumable = result.resumable;
@@ -788,13 +868,14 @@ void App::runQueue(const std::vector<uint64_t> *ids,
         // else it sent goes to the Download Folder.
         const std::string came =
             url::host(result.effectiveUrl.empty() ? item.url : result.effectiveUrl);
-        const bool fromChecked = !item.host.empty() && came == item.host;
-        const std::string folder =
-            item.sent && (!fromChecked || !remote::sentFileAllowed(result.filename))
-                ? settings_.destination
-                : item.folder;
-        if (folder != item.folder) {
-            fs::makeDirectories(folder);
+        const bool fromChecked =
+            !item.host.empty() && url::site(came) == url::site(item.host);
+        const bool belongs = fromChecked && remote::sentFileAllowed(result.filename);
+        std::string folder = item.folder;
+        if (item.sent && belongs && fs::makeDirectories(item.folder)) {
+            sdChanged(item.folder);
+        } else if (item.sent) {
+            folder = settings_.destination;
             logging::info("receive.moved", {{"file", result.filename},
                                             {"why", fromChecked ? "type" : "host"}});
         }
@@ -1014,8 +1095,12 @@ void App::receiveScreen()
     }
     net::FileSharing sharing;
     sharing.root = "sdmc:";
+    job.self = localAddress();
     sharing.access = [&job](const std::string &from, const std::string &device,
                             bool ask) { return job.access(from, device, ask); };
+    sharing.refuseLinks = [&job](const std::string &from) {
+        return job.refusesLinks(from);
+    };
     sharing.freeSpace = []() { return platform::sdFreeBytes(); };
     sharing.totalSpace = []() { return platform::sdTotalBytes(); };
     sharing.status = [&job]() { return job.snapshot(); };
@@ -1238,8 +1323,11 @@ void App::receiveScreen()
                                          bool agreed, const std::string &sender) {
         SentExtraction sent;
         std::string error;
-        if (!screens::readArchive(result.path, archives::Scan::Full,
-                                  sent.listing, error)) {
+        job.setState("busy", "Reading an archive on the 3DS.", true);
+        const bool read = screens::readArchive(result.path, archives::Scan::Full,
+                                               sent.listing, error);
+        job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
+        if (!read) {
             if (!error.empty()) {
                 ui::message("Cannot Extract", error, ui::Tone::Error,
                             "Saved as " + result.path + ".");
@@ -1257,14 +1345,29 @@ void App::receiveScreen()
                         ui::Tone::Warning, "Saved as " + result.path + ".");
             return;
         }
-        if (!sentFolderHoldsSameApp(result.path, sent, shown)) {
-            logging::warn("extract.refused", {{"file", basename(result.path)},
-                                              {"why", "folder"}});
-            ui::message("Not Extracted",
-                        "A sent archive only adds to a folder in /3ds/ that "
-                        "holds the same app.",
-                        ui::Tone::Warning, "Saved as " + result.path + ".");
-            return;
+        // What it adds to a folder already there, for the question.
+        std::string summary = "Saved as " + result.path + ".";
+        const std::string into = std::string(remote::ArchiveTarget) + shown.top + "/";
+        std::vector<std::string> clashes;
+        if (shown.topIsFolder && fs::directoryExists(into) &&
+            archives::existingFiles(shown, remote::ArchiveTarget, clashes)) {
+            const std::set<std::string> there(clashes.begin(), clashes.end());
+            std::vector<std::string> added;
+            for (const archives::Entry &entry : shown.entries) {
+                if (!entry.directory && there.count(entry.path) == 0) {
+                    added.push_back(basename(entry.path));
+                }
+            }
+            if (!added.empty()) {
+                summary += " Adds " + plural(added.size(), "new file") + " to " +
+                           into + ": " + added[0];
+                for (size_t index = 1; index < added.size() && index < 3; ++index) {
+                    summary += ", " + added[index];
+                }
+                summary += added.size() > 3
+                               ? " and " + std::to_string(added.size() - 3) + " more."
+                               : ".";
+            }
         }
         sent.agreed = agreed;
         sent.host = result.host;
@@ -1279,8 +1382,7 @@ void App::receiveScreen()
             }
         };
         job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
-        offerExtraction(result.path, remote::ArchiveTarget,
-                        "Saved as " + result.path + ".",
+        offerExtraction(result.path, remote::ArchiveTarget, summary,
                         "Extract it into /3ds/?", &shown, &sent);
     };
 
@@ -1297,6 +1399,14 @@ void App::receiveScreen()
                        {"folder", received.options.folder},
                        {"replace", received.options.replace ? "yes" : ""},
                        {"extract", received.options.extract ? "yes" : ""}});
+        // Links from a device turned down since they arrived, or from the
+        // console itself, go no further.
+        if (!received.links.empty() && received.replySocket < 0 &&
+            job.refusesLinks(received.from)) {
+            logging::info("receive.refused", {{"from", received.from}});
+            net::finishReceived(received);
+            return;
+        }
         const std::string who = whoIs(received.device, received.from);
         const std::string sender = senderOf(received.device, received.from);
         const std::vector<ui::Fact> from = {
@@ -1335,6 +1445,11 @@ void App::receiveScreen()
         // asking: the question names where the files really come from, and
         // what is downloaded is held to it (QueuedLink::host).
         std::map<std::string, std::string> leadsTo;
+        // Never the console itself, and for links another site sent,
+        // nothing on this network: the check would otherwise reach them
+        // before anyone agreed to anything.
+        const bool anotherSite = !fromFbiTool && !received.ownPage;
+        std::set<std::string> refused;
         job.setState("busy", "Checking the links on the 3DS.", true);
         const uint64_t checkStarted = osGetTime();
         const bool checked = tasks::busy(
@@ -1352,9 +1467,15 @@ void App::receiveScreen()
                     request.connectTimeoutSeconds = 10;
                     request.totalTimeoutSeconds = 15;
                     request.cancel = &busy.cancel;
+                    request.refuse = [anotherSite](const std::string &to,
+                                                   const std::string &from) {
+                        return remote::addressRefused(to, from, anotherSite);
+                    };
                     const net::Destination destination = net::whereTo(request);
                     if (destination.ok) {
                         leadsTo[link] = url::host(destination.url);
+                    } else if (destination.refused) {
+                        refused.insert(link);
                     }
                     ++busy.done;
                 }
@@ -1367,12 +1488,31 @@ void App::receiveScreen()
         logging::info("receive.checked",
                       {{"links", received.links.size()},
                        {"elsewhere", elsewhere},
+                       {"refused", refused.size()},
                        {"unknown", received.links.size() - leadsTo.size()},
                        {"ms", osGetTime() - checkStarted}});
-        // Comes from where the check found its link to lead.
+        if (!checked) {
+            job.finish("Not downloaded: the check was stopped on the 3DS.", false, true);
+            net::finishReceived(received);
+            return;
+        }
+        received.links.erase(
+            std::remove_if(received.links.begin(), received.links.end(),
+                           [&](const std::string &link) {
+                               return refused.count(link) != 0;
+                           }),
+            received.links.end());
+        if (received.links.empty()) {
+            job.finish("Not downloaded: the links lead to addresses on this network.",
+                       false, true);
+            net::finishReceived(received);
+            return;
+        }
+        // Comes from the site the check found its link to lead to.
         const auto fromChecked = [&](const QueueResult &result) {
             const auto found = leadsTo.find(result.url);
-            return found != leadsTo.end() && found->second == result.host;
+            return found != leadsTo.end() &&
+                   url::site(found->second) == url::site(result.host);
         };
 
         enum class Choice { Install, Download, Queue, Cancel, DontAllow };
@@ -1402,13 +1542,18 @@ void App::receiveScreen()
         if (!offerInstall) {
             facts.push_back({"Save to", folder});
         }
-        // Holds the links just queued to where the check found them to lead.
+        // Holds the links just queued to where the check found them to lead,
+        // or to nowhere when it could not tell.
         const auto holdToChecked = [&]() {
             for (QueuedLink &item : queue_) {
-                const auto found = leadsTo.find(item.url);
-                if (found != leadsTo.end() && item.folder == folder) {
-                    item.host = found->second;
+                if (item.folder != folder ||
+                    std::find(received.links.begin(), received.links.end(),
+                              item.url) == received.links.end()) {
+                    continue;
                 }
+                const auto found = leadsTo.find(item.url);
+                item.host = found != leadsTo.end() ? found->second : "";
+                item.foreign = anotherSite;
             }
         };
         ui::Dialog dialog;
@@ -1433,8 +1578,7 @@ void App::receiveScreen()
         }
         dialog.drawTop = [&]() { drawHandedOver(names, facts); };
         job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
-        // Stopping the check turns the links down.
-        const int picked = checked ? ui::choose(dialog) : dialog.cancelButton;
+        const int picked = ui::choose(dialog);
         const Choice choice = picked >= 0 && picked < static_cast<int>(choices.size())
                                   ? choices[picked]
                                   : Choice::Cancel;
@@ -1494,6 +1638,7 @@ void App::receiveScreen()
             }
             const bool extract =
                 options.extract && (agreed || settings_.offerZipExtraction);
+            turnedDown.erase(received.from);
             const uint64_t first = nextQueueId_;
             addToQueue(received.links, folder, false, !options.folder.empty());
             holdToChecked();
@@ -1575,6 +1720,7 @@ void App::receiveScreen()
                 });
             if ((!options.folder.empty() || options.extract) &&
                 strayed != results.end() && ui::keepRunning()) {
+                job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
                 const auto found = leadsTo.find(strayed->url);
                 ui::message("Saved in the Download Folder",
                             strayed->name + " came from " + strayed->host +
@@ -1590,6 +1736,7 @@ void App::receiveScreen()
         } else if (choice == Choice::Queue) {
             // The Queue keeps only the folder: Download All keeps both on a
             // clash, as it always has.
+            turnedDown.erase(received.from);
             addToQueue(received.links, folder, false, !options.folder.empty());
             holdToChecked();
             receiveLog_.addLinks(received, RowState::Queued, clockNow());
@@ -1598,7 +1745,7 @@ void App::receiveScreen()
         } else if (choice == Choice::DontAllow) {
             // Until Receive closes, its links and the file page are refused
             // before they reach the console.
-            job.answer(received.from, false);
+            job.denyLinks(received.from);
             logging::info("receive.denied", {{"from", received.from}});
             job.finish("Not downloaded: the 3DS turned this device down.", false, true);
         } else {

@@ -732,6 +732,38 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
                                    ? folder + listing.top + "/"
                                    : target;
 
+    if (sent != nullptr) {
+        if (sent->extracting) {
+            sent->extracting(true);
+        }
+        const SameApp same = sentFolderHoldsSameApp(path, *sent, listing);
+        if (sent->extracting) {
+            sent->extracting(false);
+        }
+        if (same != SameApp::Yes) {
+            logging::warn("extract.refused",
+                          {{"file", basename(path)},
+                           {"why", same == SameApp::No       ? "folder"
+                                   : same == SameApp::NoRoom ? "space"
+                                                             : "stopped"}});
+        }
+        if (same == SameApp::No) {
+            ui::message("Not Extracted",
+                        "A sent archive only adds to a folder in /3ds/ that "
+                        "holds the same app.",
+                        ui::Tone::Warning, summary);
+            return;
+        }
+        if (same == SameApp::NoRoom) {
+            ui::message("Not enough free space",
+                        "The SD card is too full to check the archive.",
+                        ui::Tone::Error, summary);
+            return;
+        }
+        if (same == SameApp::Stopped) {
+            return;
+        }
+    }
     archives::Options options =
         sent != nullptr ? sent->options : archives::Options();
     // Without a full listing the archive's own size is the least it needs.

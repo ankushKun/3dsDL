@@ -654,3 +654,21 @@ TEST("engine: discarding a partial download")
     net::discardPartial(folder.path(), env("FIXTURE_HTTP") + path);
     CHECK(listAll(folder.path()).empty());
 }
+
+TEST("engine: an address the request refuses is never asked")
+{
+    TempDir folder;
+    Recorder recorder;
+    net::Request value = request("/redirect/2", folder);
+    value.refuse = [](const std::string &to, const std::string &from) {
+        CHECK(!from.empty());
+        return to == "127.0.0.1";
+    };
+    const net::Result result = net::download(value, recorder);
+    CHECK(result.outcome == net::Outcome::Failed);
+    CHECK(contains(result.message, "address on this network"));
+    CHECK(!result.resumable);
+
+    value.refuse = [](const std::string &, const std::string &) { return false; };
+    CHECK(net::download(value, recorder).outcome == net::Outcome::Completed);
+}

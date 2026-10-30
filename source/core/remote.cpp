@@ -88,10 +88,15 @@ const char *statusText(int status)
 }
 
 // A name a sender may not use: "~" and a digit anywhere, which on FAT can
-// be another file's or folder's short name (BOOT~1.FIR for boot.firm), or
-// anything past ASCII, whose case FAT may fold in ways text::lower does not.
+// be another file's or folder's short name (BOOT~1.FIR for boot.firm),
+// anything past ASCII, whose case FAT may fold in ways text::lower does not,
+// or an end in a space or a dot, which some FAT drivers drop, making it
+// another name ("3dsDL." is "3dsDL").
 bool unsafeSentName(const std::string &name)
 {
+    if (!name.empty() && (name.back() == ' ' || name.back() == '.')) {
+        return true;
+    }
     for (size_t at = 0; at < name.size(); ++at) {
         const unsigned char c = static_cast<unsigned char>(name[at]);
         if (c >= 0x80 || (c == '~' && at + 1 < name.size() &&
@@ -417,6 +422,45 @@ bool fromOwnPage(const HttpRequest &request)
     return toConsole(request) && markedByPage(request);
 }
 
+bool addressRefused(const std::string &to, const std::string &from,
+                    bool privateToo)
+{
+    if (to.empty()) {
+        return false;
+    }
+    if (to == from) {
+        return true;
+    }
+    std::string v4 = to;
+    const std::string lower = text::lower(to);
+    if (lower.rfind("::ffff:", 0) == 0) {
+        v4 = to.substr(7); // an IPv4 address written as IPv6
+    } else if (lower.find(':') != std::string::npos) {
+        if (lower == "::1" || lower == "::") {
+            return true;
+        }
+        // Unique local (fc00::/7) and link-local (fe80::/10) addresses.
+        return privateToo &&
+               (lower.rfind("fc", 0) == 0 || lower.rfind("fd", 0) == 0 ||
+                lower.rfind("fe8", 0) == 0 || lower.rfind("fe9", 0) == 0 ||
+                lower.rfind("fea", 0) == 0 || lower.rfind("feb", 0) == 0);
+    }
+    in_addr parsed {};
+    if (inet_aton(v4.c_str(), &parsed) == 0) {
+        return false;
+    }
+    const uint32_t ip = ntohl(parsed.s_addr);
+    const auto in = [ip](uint32_t network, int bits) {
+        return (ip >> (32 - bits)) == (network >> (32 - bits));
+    };
+    if (in(0x7f000000, 8) || in(0x00000000, 8)) {
+        return true; // loopback, and "this network"
+    }
+    return privateToo &&
+           (in(0x0a000000, 8) || in(0xac100000, 12) || in(0xc0a80000, 16) ||
+            in(0xa9fe0000, 16) || in(0x64400000, 10) || ip >= 0xe0000000);
+}
+
 bool localPath(const std::string &root, const std::string &webPath,
                std::string &out)
 {
@@ -598,6 +642,18 @@ bool sentArchive(const std::vector<std::string> &paths,
             return false;
         }
         out.top = *tops.begin();
+        // A loose file in its 3ds folder lands in /3ds/ itself, where only
+        // an app belongs: anything else there, such as a launcher's .xml
+        // shortcut, could pose as one.
+        const bool folder = std::any_of(
+            paths.begin(), paths.end(), [&](const std::string &path) {
+                return text::lower(path).rfind("3ds/" + out.top + "/", 0) == 0;
+            });
+        const filetype::Kind kind = filetype::fromName(out.top);
+        if (!folder && kind != filetype::Kind::Homebrew &&
+            kind != filetype::Kind::Cia) {
+            return false;
+        }
     } else if (tops.size() == 1 && inFolder) {
         out.top = *tops.begin();
     } else {
