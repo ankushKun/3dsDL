@@ -5,6 +5,7 @@
 #include "cia.hpp"
 #include "fs_util.hpp"
 #include "image.hpp"
+#include "remote.hpp"
 #include "smdh.hpp"
 
 #include <algorithm>
@@ -49,6 +50,7 @@ struct Options {
     bool withMeta = true;
     bool encrypted = false;
     uint8_t ncchFlags = 0x20; // uses a seed
+    uint64_t titleId = TestTitleId;
 };
 
 // A CIA with the sections 3dsDL reads: an RSA-2048 signed TMD with one
@@ -73,7 +75,7 @@ std::string makeCia(const Options &options = Options())
 
     putBe(data, tmd, 0x10004, 4);
     const size_t header = tmd + 0x140;
-    putBe(data, header + 0x4c, TestTitleId, 8);
+    putBe(data, header + 0x4c, options.titleId, 8);
     putBe(data, header + 0x9c, TestVersion, 2);
     putBe(data, header + 0x9e, 1, 2);
     putBe(data, header + 0xc4 + 0x900 + 6, options.encrypted ? 1 : 0, 2);
@@ -373,4 +375,22 @@ TEST("fs: entries list folders first, then files with sizes")
     }
     fs::listEntries(temp.path() + "missing/", &ok);
     CHECK(!ok);
+}
+
+TEST("remote: a sender's CIA replaces only one with its title ID")
+{
+    TempDir temp;
+    Options other;
+    other.titleId = 0x0004000000ABCD00ULL;
+    CHECK(writeText(temp.path() + "old.cia", makeCia()));
+    CHECK(writeText(temp.path() + "new.cia", makeCia()));
+    CHECK(writeText(temp.path() + "other.cia", makeCia(other)));
+    CHECK(writeText(temp.path() + "junk.cia", "not a CIA"));
+    std::string name;
+    CHECK(remote::sameApp(temp.path() + "old.cia", temp.path() + "new.cia", &name));
+    CHECK(!name.empty());
+    CHECK(!remote::sameApp(temp.path() + "old.cia", temp.path() + "other.cia"));
+    CHECK(!remote::sameApp(temp.path() + "old.cia", temp.path() + "junk.cia"));
+    CHECK(!remote::sameApp(temp.path() + "junk.cia", temp.path() + "junk.cia"));
+    CHECK(!remote::sameApp(temp.path() + "old.cia", temp.path() + "gone.cia"));
 }

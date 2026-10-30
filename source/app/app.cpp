@@ -11,6 +11,7 @@
 #include "naming.hpp"
 #include "ntp.hpp"
 #include "platform.hpp"
+#include "remote.hpp"
 #include "savedata.hpp"
 #include "saves.hpp"
 #include "scanner.hpp"
@@ -28,6 +29,7 @@
 #include <cstdlib>
 #include <iterator>
 #include <map>
+#include <set>
 
 namespace {
 
@@ -748,6 +750,9 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
                     ui::Tone::Error);
         return;
     }
+    // For a sender's archive: an app already where an entry lands, to the
+    // name the archive's copy goes in under beside it.
+    std::map<std::string, std::string> beside;
     if (listing.complete) {
         std::vector<std::string> clashes;
         if (fs::directoryExists(target)) {
@@ -775,7 +780,44 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
                 return;
             }
         }
-        if (!clashes.empty()) {
+        if (sent != nullptr) {
+            // A sender never overwrites: an app it updates goes in beside
+            // the one there, to be asked about once extracted, and anything
+            // else already there is kept.
+            options.existing = archives::Existing::Skip;
+            std::set<std::string> taken;
+            for (const archives::Entry &entry : listing.entries) {
+                taken.insert(text::lower(entry.path));
+            }
+            for (const std::string &clash : clashes) {
+                if (!remote::sentMayReplace(basename(clash))) {
+                    continue;
+                }
+                const std::string within =
+                    clash.substr(0, clash.find_last_of('/') + 1);
+                const std::string free = naming::unusedPath(
+                    target + within, basename(clash),
+                    [&](const std::string &candidate) {
+                        return fs::fileExists(candidate) ||
+                               taken.count(text::lower(
+                                   candidate.substr(target.size()))) > 0;
+                    });
+                if (!free.empty()) {
+                    beside[clash] = free.substr(target.size());
+                    taken.insert(text::lower(beside[clash]));
+                }
+            }
+            if (!beside.empty()) {
+                const auto place = options.place;
+                options.place = [place, beside](const std::string &path,
+                                                bool directory) {
+                    const std::string placed = place(path, directory);
+                    const auto found =
+                        directory ? beside.end() : beside.find(placed);
+                    return found != beside.end() ? found->second : placed;
+                };
+            }
+        } else if (!clashes.empty()) {
             ui::Dialog question;
             question.header = "extract";
             question.title = clashes.size() == 1
@@ -849,6 +891,16 @@ void App::offerExtraction(const std::string &path, const std::string &folder,
     if (result.skippedPlaced > 0) {
         notes += plural(result.skippedPlaced, "file") +
                  " left out of a sent archive. ";
+    }
+    for (const auto &app : beside) {
+        const std::string newer = target + app.second;
+        if (!fs::fileExists(newer)) {
+            continue;
+        }
+        notes += replaceSent(newer, target + app.first, sent->host, sent->sender)
+                     ? basename(app.first) + " updated. "
+                     : basename(app.second) + " kept beside " +
+                           basename(app.first) + ". ";
     }
 
     // Without a full listing nothing could be asked before, so what was

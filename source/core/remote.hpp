@@ -110,7 +110,8 @@ bool localPath(const std::string &root, const std::string &webPath,
                std::string &out);
 
 // What a link sender may ask for besides the links: folder=/3ds/app (a page
-// path, as the file API takes) saves there instead of the Download Folder;
+// path, as the file API takes; /3ds/ or /cias/, or one folder in them)
+// saves apps and archives there instead of the Download Folder;
 // replace=1, with a folder, asks whether a link the queue kept beside a
 // file of the same name should replace it; extract=1 asks whether to
 // extract an archive into /3ds/ (see SentArchive). Any site can open /send,
@@ -135,6 +136,19 @@ bool sendFolderAllowed(const std::string &path);
 // or boot.3dsx, the Homebrew Launcher's own name, and never a name like
 // "APP~1.CIA", which on FAT can be another file's short name.
 bool sentNameAllowed(const std::string &filename);
+
+// Whether a file a sender's link saved may stay in the folder the sender
+// named: a .3dsx, a CIA or an archive, with a name sentNameAllowed allows.
+// Anything else goes to the Download Folder, so a sender never leaves
+// settings, scripts or data in an app's folder.
+bool sentFileAllowed(const std::string &filename);
+
+// Whether newer is an update to older, as their contents say: CIAs with one
+// title ID, or 3dsx files with one title and publisher. A file that says
+// nothing about itself matches nothing, so it is never replaced. name, when
+// given, is set to the app's name.
+bool sameApp(const std::string &older, const std::string &newer,
+             std::string *name = nullptr);
 
 // Whether a file a sender's link saved may replace one of the same name:
 // only a .3dsx or a .cia, which is what an update is, never another app's

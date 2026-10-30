@@ -1,14 +1,18 @@
 #include "remote.hpp"
 
 #include "archives.hpp"
+#include "cia.hpp"
 #include "file_ops.hpp"
+#include "file_types.hpp"
 #include "finalize.hpp"
 #include "naming.hpp"
 #include "text.hpp"
+#include "title_meta.hpp"
 #include "url.hpp"
 
 #include <arpa/inet.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <cstdlib>
@@ -429,10 +433,19 @@ bool sendOptions(const std::string &form, SendOptions &out, std::string &why)
     if (!folder.empty()) {
         std::string path;
         if (!localPath("sdmc:", folder, path) || !sendFolderAllowed(path)) {
-            why = "Links can only be saved in /3ds/ or /cias/.";
+            why = "Links can only be saved in /3ds/ or /cias/, or one folder "
+                  "in them.";
             return false;
         }
         out.folder = path.back() == '/' ? path : path + "/";
+        // Apps live in /3ds/ or one folder in it; what is deeper is their
+        // data, which a sender has no business in.
+        if (std::count(out.folder.begin() + 6, out.folder.end(), '/') > 2) {
+            out = SendOptions();
+            why = "Links can only be saved in /3ds/ or /cias/, or one folder "
+                  "in them.";
+            return false;
+        }
     }
     out.replace = formValue(form, "replace") == "1";
     out.extract = formValue(form, "extract") == "1";
@@ -467,6 +480,52 @@ bool sentNameAllowed(const std::string &filename)
     const std::string name = text::lower(filename);
     return !name.empty() && !unsafeSentName(name) && name != "boot.3dsx" &&
            name != "3dsdl.3dsx";
+}
+
+bool sentFileAllowed(const std::string &filename)
+{
+    const filetype::Kind kind = filetype::fromName(filename);
+    return sentNameAllowed(filename) &&
+           (kind == filetype::Kind::Homebrew || kind == filetype::Kind::Cia ||
+            kind == filetype::Kind::Archive);
+}
+
+bool sameApp(const std::string &older, const std::string &newer,
+             std::string *name)
+{
+    const filetype::Kind kind = filetype::fromName(older);
+    if (kind != filetype::fromName(newer)) {
+        return false;
+    }
+    std::string error;
+    if (kind == filetype::Kind::Cia) {
+        cia::Info was;
+        cia::Info now;
+        if (!cia::readInfo(older, was, error, true) ||
+            !cia::readInfo(newer, now, error, true) || was.titleId != now.titleId) {
+            return false;
+        }
+        if (name != nullptr) {
+            *name = !now.smdh.shortName.empty() ? now.smdh.shortName
+                                                : cia::titleIdText(now.titleId);
+        }
+        return true;
+    }
+    if (kind == filetype::Kind::Homebrew) {
+        titlemeta::Meta was;
+        titlemeta::Meta now;
+        if (!titlemeta::read(older, kind, was, error) ||
+            !titlemeta::read(newer, kind, now, error) || was.name.empty() ||
+            text::lower(was.name) != text::lower(now.name) ||
+            text::lower(was.publisher) != text::lower(now.publisher)) {
+            return false;
+        }
+        if (name != nullptr) {
+            *name = now.name;
+        }
+        return true;
+    }
+    return false;
 }
 
 bool sentMayReplace(const std::string &filename)

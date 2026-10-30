@@ -238,6 +238,14 @@ with a few hundred files.
     consoles on Receive the second answers to 3ds-2.local. Record whether
     the console joined the multicast group at all (http://3ds.local is
     missing under the address if it did not).
+58g. A page's /send with folder=/3ds/<app>/: a .3dsx lands there, a .ini
+    sent the same way lands in the Download Folder, and
+    folder=/3ds/<app>/data/ is refused. With replace=1, an update of the
+    same app asks Keep Both / Replace and Replace leaves one file; a
+    different app with the same file name keeps both without asking.
+58h. extract=1 on a ZIP of an app already in /3ds/<app>/: its settings file
+    in that folder is unchanged afterwards, and the new .3dsx is asked
+    about. A ZIP whose top folder is another app's folder is not extracted.
 
 ### Saves, tickets and sounds
 

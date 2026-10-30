@@ -31,6 +31,10 @@ A Nintendo 3DS homebrew app (C++17, libctru, citro2d) that downloads files, inst
 - `source/core/archives` reads and extracts: ZIP through 3dsDL's own reader (`zip.cpp`, stored and deflated, in stored order), everything else (7z, RAR, tar and compressed tars, ZIPs packed with bzip2, LZMA, XZ or Zstandard) through libarchive. Both write through `archives::Writer`.
 - On FAT every lookup reads through the whole folder, so per-file calls are what makes thousands of files slow. Writer looks up nothing for a small new file: existing names come from one listing per folder (`FolderNames`), each folder is made once, and the file is just open, a size check on the open file, write and close. Only large files and files being replaced are looked up. Keep it that way.
 
+## Receive
+
+- Any web page can call `/send` with `folder=`, `replace=` and `extract=`, so the rules are in `source/core/remote` (`sendOptions`, `sentFileAllowed`, `sameApp`, `sentExtraction`) with host tests, and the console asks before each step. A sender never overwrites anything: a download keeps both on a clash, a replace needs `remote::sameApp` and a yes, and a sent archive only adds to a folder of the same app (`App::sentFolderHoldsSameApp`), with an app it updates put beside the old one for `App::replaceSent` to ask about. Keep new sender options to those terms.
+
 ## Testing in Azahar
 
 - Azahar only takes taps while it has focus. A build with `THREEDSDL_EXTRA_DEFINES=-DTHREEDSDL_SCRIPTED_INPUT` also reads lines appended to `sdmc:/3ds/3dsDL/input.txt` (`tap X Y` in bottom-screen pixels, or `key A`, `key DOWN` and so on), so it can be driven in the background while screenshots come from the window.

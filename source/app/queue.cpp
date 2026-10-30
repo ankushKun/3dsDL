@@ -566,8 +566,88 @@ void drawHandedOver(const std::vector<Named> &names,
 
 } // namespace
 
+bool App::replaceSent(const std::string &newer, const std::string &older,
+                      const std::string &host, const std::string &sender)
+{
+    std::string app;
+    if (!remote::sameApp(older, newer, &app)) {
+        logging::info("replace.skipped", {{"file", basename(older)}});
+        return false;
+    }
+    const std::vector<Named> named = {{basename(older), host}};
+    const std::vector<ui::Fact> facts = {{"From", sender},
+                                         {"App", app},
+                                         {"Already in", naming::parentFolder(older)},
+                                         {"Kept as", basename(newer)}};
+    ui::Dialog dialog;
+    dialog.header = "Receive";
+    dialog.title = "A file with this name already exists.";
+    dialog.tone = ui::Tone::Warning;
+    dialog.buttons = {"Keep Both", "Replace"};
+    dialog.dangerous = 1;
+    dialog.cancelButton = 0;
+    dialog.drawTop = [&]() { drawHandedOver(named, facts); };
+    if (ui::choose(dialog) != 1) {
+        return false;
+    }
+    checkSdIndex(); // so only this change counts as explained
+    const bool replaced = finalize::replace(newer, older);
+    fileIndex_.changed(newer);
+    sdChanged(older);
+    if (!replaced) {
+        logging::warn("replace.failed", {{"file", basename(older)}});
+        ui::message("Could Not Replace", "The new one is " + newer + ".",
+                    ui::Tone::Error);
+        return false;
+    }
+    logging::info("replace.done", {{"file", basename(older)}});
+    return true;
+}
+
+bool App::sentFolderHoldsSameApp(const std::string &archive,
+                                 const SentExtraction &sent,
+                                 const archives::Listing &shown)
+{
+    const std::string folder = std::string(remote::ArchiveTarget) + shown.top + "/";
+    if (!shown.topIsFolder || !fs::directoryExists(folder) ||
+        fs::listEntries(folder, nullptr, true, false).empty()) {
+        return true;
+    }
+    // A 3dsx the archive has where the folder has one: taken out on its own
+    // to compare, as the archive's listing says nothing about what is in it.
+    const std::string scratch = std::string(storage::DataFolder) + "check/";
+    for (const archives::Entry &entry : sent.listing.entries) {
+        if (entry.directory || entry.path.empty()) {
+            continue;
+        }
+        const std::string placed = sent.options.place(entry.path, false);
+        const std::string there = std::string(remote::ArchiveTarget) + placed;
+        if (placed.empty() ||
+            filetype::fromName(placed) != filetype::Kind::Homebrew ||
+            !fs::fileExists(there)) {
+            continue;
+        }
+        archives::Options one;
+        one.only = {entry.path};
+        one.existing = archives::Existing::Overwrite;
+        one.place = [](const std::string &, bool directory) {
+            return directory ? std::string() : std::string("app.3dsx");
+        };
+        const archives::Result taken =
+            tasks::extract(archive, sent.listing, scratch, one);
+        const bool same = taken.ok && taken.extracted == 1 &&
+                          remote::sameApp(there, scratch + "app.3dsx");
+        fs::removeFolderTree(scratch);
+        sdChanged(scratch);
+        if (same) {
+            return true;
+        }
+    }
+    return false;
+}
+
 void App::addToQueue(const std::vector<std::string> &links,
-                     const std::string &folder, bool announce)
+                     const std::string &folder, bool announce, bool sent)
 {
     size_t added = 0;
     for (const std::string &link : links) {
@@ -582,6 +662,7 @@ void App::addToQueue(const std::vector<std::string> &links,
         item.id = nextQueueId_++;
         item.url = link;
         item.folder = folder;
+        item.sent = sent;
         queue_.push_back(item);
         ++added;
     }
@@ -698,12 +779,22 @@ void App::runQueue(const std::vector<uint64_t> *ids,
             continue;
         }
 
-        // A queue never stops to ask about names: a clash keeps both.
+        // A queue never stops to ask about names: a clash keeps both. A
+        // sender's folder takes only apps and archives; anything else it
+        // sent goes to the Download Folder.
+        const std::string folder =
+            item.sent && !remote::sentFileAllowed(result.filename)
+                ? settings_.destination
+                : item.folder;
+        if (folder != item.folder) {
+            fs::makeDirectories(folder);
+            logging::info("receive.moved", {{"file", result.filename}});
+        }
         const finalize::Result placed =
-            finalize::commit(result.partPath, item.folder, result.filename,
+            finalize::commit(result.partPath, folder, result.filename,
                              false, platform::now());
         HistoryEntry entry = historyEntry(
-            item.url, item.folder,
+            item.url, folder,
             placed.ok ? HistoryStatus::Saved : HistoryStatus::Failed,
             placed.ok ? "Saved from the queue" : placed.message);
         entry.bytes = result.bytes;
@@ -1116,34 +1207,11 @@ void App::receiveScreen()
     // its sender named: now that the server's name for it is known, the
     // console says whether it replaces older. True when it did.
     const auto askToReplace = [&](QueueResult &result, const std::string &older,
-                                  const std::vector<ui::Fact> &from) {
-        const std::vector<Named> named = {{result.filename, result.host}};
-        std::vector<ui::Fact> facts = from;
-        facts.push_back({"Already in", naming::parentFolder(older)});
-        facts.push_back({"Kept as", basename(result.path)});
-        ui::Dialog dialog;
-        dialog.header = "Receive";
-        dialog.title = "A file with this name already exists.";
-        dialog.tone = ui::Tone::Warning;
-        dialog.buttons = {"Keep Both", "Replace"};
-        dialog.dangerous = 1;
-        dialog.cancelButton = 0;
-        dialog.drawTop = [&]() { drawHandedOver(named, facts); };
+                                  const std::string &sender) {
         job.setState("choosing", "Waiting for you to choose on the 3DS.", true);
-        if (ui::choose(dialog) != 1) {
+        if (!replaceSent(result.path, older, result.host, sender)) {
             return false;
         }
-        checkSdIndex(); // so only this change counts as explained
-        const bool replaced = finalize::replace(result.path, older);
-        fileIndex_.changed(result.path);
-        sdChanged(older);
-        if (!replaced) {
-            logging::warn("replace.failed", {{"file", result.filename}});
-            ui::message("Could Not Replace", "The new one is " + result.path + ".",
-                        ui::Tone::Error);
-            return false;
-        }
-        logging::info("replace.done", {{"file", result.filename}});
         for (HistoryEntry &entry : history_) {
             if (entry.path == result.path) {
                 entry.path = older;
@@ -1160,7 +1228,7 @@ void App::receiveScreen()
     // solid RARs cost more that way. agreed: the console said yes before the
     // download.
     const auto offerSentExtraction = [&](const QueueResult &result,
-                                         bool agreed) {
+                                         bool agreed, const std::string &sender) {
         SentExtraction sent;
         std::string error;
         if (!screens::readArchive(result.path, archives::Scan::Full,
@@ -1182,7 +1250,18 @@ void App::receiveScreen()
                         ui::Tone::Warning, "Saved as " + result.path + ".");
             return;
         }
+        if (!sentFolderHoldsSameApp(result.path, sent, shown)) {
+            logging::warn("extract.refused", {{"file", basename(result.path)},
+                                              {"why", "folder"}});
+            ui::message("Not Extracted",
+                        "A sent archive only adds to a folder in /3ds/ that "
+                        "holds the same app.",
+                        ui::Tone::Warning, "Saved as " + result.path + ".");
+            return;
+        }
         sent.agreed = agreed;
+        sent.host = result.host;
+        sent.sender = sender;
         // The page's text names no file, as any device on the network sees it.
         sent.extracting = [&](bool started) {
             if (started) {
@@ -1208,6 +1287,7 @@ void App::receiveScreen()
                        {"replace", received.options.replace ? "yes" : ""},
                        {"extract", received.options.extract ? "yes" : ""}});
         const std::string who = whoIs(received.device, received.from);
+        const std::string sender = senderOf(received.device, received.from);
         const std::vector<ui::Fact> from = {
             {"From", senderOf(received.device, received.from)}};
         if (!received.install.empty()) {
@@ -1336,7 +1416,7 @@ void App::receiveScreen()
             const bool extract =
                 options.extract && (agreed || settings_.offerZipExtraction);
             const uint64_t first = nextQueueId_;
-            addToQueue(received.links, folder, false);
+            addToQueue(received.links, folder, false, !options.folder.empty());
             std::vector<uint64_t> ids;
             for (const QueuedLink &item : queue_) {
                 // When the sender named a folder, the same link queued for
@@ -1378,7 +1458,7 @@ void App::receiveScreen()
                                                         result.filename, folder,
                                                         saved)
                              : "";
-                    if (!older.empty() && askToReplace(result, older, from)) {
+                    if (!older.empty() && askToReplace(result, older, sender)) {
                         saved.insert(text::lower(older));
                     }
                 }
@@ -1399,8 +1479,10 @@ void App::receiveScreen()
                     filetype::fromName(basename(result.path)) ==
                         filetype::Kind::Archive) {
                     offerSentExtraction(
-                        result, agreed && filetype::fromName(nameOf(result.url)) ==
-                                              filetype::Kind::Archive);
+                        result,
+                        agreed && filetype::fromName(nameOf(result.url)) ==
+                                      filetype::Kind::Archive,
+                        sender);
                 }
             }
             // What a stop left behind is still in the Queue.
@@ -1410,7 +1492,7 @@ void App::receiveScreen()
         } else if (choice == Choice::Queue) {
             // The Queue keeps only the folder: Download All keeps both on a
             // clash, as it always has.
-            addToQueue(received.links, folder, false);
+            addToQueue(received.links, folder, false, !options.folder.empty());
             receiveLog_.addLinks(received, RowState::Queued, clockNow());
             linksIn += static_cast<uint32_t>(count);
             job.finish("Added " + links + " to the Queue on the 3DS.", true, true);

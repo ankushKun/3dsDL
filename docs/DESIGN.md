@@ -167,6 +167,8 @@ strip for a red button and a 30 px dark Cancel strip.
 | History | the highlighted download in full | rows with Installed, Resume, Saved, Failed badges |
 | Receive | QR code for the page, the address in large type and http://3ds.local under it; while a file is on its way, its progress as Downloading shows it, with the address at the end of the dotted line | what came in and went out since 3dsDL started, newest first: a bar on what is on its way, the size of what arrived, Installed, Failed, Sent, Queued and Stopped badges, Back |
 | Received row | the row's name and facts | Install, Install and Delete File, Show in Files |
+| Sent replace | the file, its host, the sender, the app, its folder and the name the new one was kept as | dialog: Keep Both / Replace, starting on Keep Both; only for the same app |
+| Sent extract | what the archive holds and the one folder in /3ds/ it goes into | dialog: Extract / Not Now, starting on Not Now unless the console said yes before the download |
 | Settings | the highlighted section's current values | About and Updates bars, four tiles, Back / Report Issue |
 | Report an Issue | QR code, name and address of the highlighted place | Report a Bug, Discord Server, Developer on X; the Details row to mention, and the Crash Log row when there is one; Back |
 | Setting choice | the setting's icon | recessed options, the current one chosen |

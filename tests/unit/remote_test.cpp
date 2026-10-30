@@ -402,3 +402,34 @@ TEST("remote: extracting a sender's archive, from its listing")
     archives::Options none;
     CHECK(!remote::sentExtraction(listing, "App.zip", none, shown));
 }
+
+TEST("remote: a sender's folder is /3ds/ or /cias/ or one folder in them")
+{
+    remote::SendOptions options;
+    std::string why;
+    for (const char *good : {"folder=%2F3ds", "folder=%2F3ds%2F", "folder=%2F3ds%2FApp",
+                             "folder=%2F3ds%2FApp%2F", "folder=%2Fcias%2FGames"}) {
+        CHECK(remote::sendOptions(std::string("links=x&") + good, options, why));
+    }
+    for (const char *deep : {"folder=%2F3ds%2FCheckpoint%2Fsaves",
+                             "folder=%2F3ds%2FApp%2Fdata%2F",
+                             "folder=%2Fcias%2Fa%2Fb"}) {
+        why.clear();
+        CHECK(!remote::sendOptions(std::string("links=x&") + deep, options, why));
+        CHECK(!why.empty());
+        CHECK(options.folder.empty());
+    }
+}
+
+TEST("remote: a sender's folder keeps only apps and archives")
+{
+    for (const char *kept : {"App.3dsx", "game.CIA", "game.zcia", "pack.zip",
+                             "pack.7z", "pack.tar.gz"}) {
+        CHECK(remote::sentFileAllowed(kept));
+    }
+    for (const char *moved : {"config.ini", "cheats.json", "script.lua",
+                              "plugin.3gx", "boot.firm", "save.bin", "boot.3dsx",
+                              "3dsDL.3dsx", "APP~1.3DS", "ap\xc3\xa9.3dsx", ""}) {
+        CHECK(!remote::sentFileAllowed(moved));
+    }
+}

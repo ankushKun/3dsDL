@@ -63,12 +63,17 @@ private:
     // archive's own, which the extractors read. It goes into folder only,
     // with no New Folder; the question starts on Not Now unless the console
     // said yes before the download, and extracting runs once it is chosen.
+    // A sender never overwrites: what is already there is kept, and an app
+    // the archive updates goes in beside the old one, then replaceSent asks
+    // about it.
     struct SentExtraction {
         archives::Options options;
         archives::Listing listing;
         bool agreed = false;
         // Called with true as extracting starts and false once it ends.
         std::function<void(bool)> extracting;
+        std::string host;   // where the archive came from
+        std::string sender; // who sent it, as Receive names them
     };
     // Asks where to extract an archive, then extracts it. known is a
     // listing already read, such as the archive viewer's.
@@ -201,11 +206,29 @@ private:
         uint64_t id = 0;
         std::string url;
         std::string folder;
+        // The folder came from the link's sender (remote::SendOptions), so
+        // only what remote::sentFileAllowed allows is saved there.
+        bool sent = false;
         State state = State::Waiting;
         std::string message; // why it failed
     };
     void addToQueue(const std::vector<std::string> &links,
-                    const std::string &folder, bool announce);
+                    const std::string &folder, bool announce,
+                    bool sent = false);
+    // Whether a sender's archive may go into its folder in /3ds/ (shown is
+    // the archive as placed): yes when that folder is not there yet or is
+    // empty, or when it holds a 3dsx where the archive has one of the same
+    // app (remote::sameApp), which is taken out to a scratch file to
+    // compare. Otherwise a sender could add files to another app's folder.
+    bool sentFolderHoldsSameApp(const std::string &archive,
+                                const SentExtraction &sent,
+                                const archives::Listing &shown);
+    // Whether newer, which a sender's link or archive put beside older,
+    // takes its place: asked only for an update to the same app
+    // (remote::sameApp), starting on Keep Both; any other file keeps both
+    // without a question. True when newer replaced older.
+    bool replaceSent(const std::string &newer, const std::string &older,
+                     const std::string &host, const std::string &sender);
     void queueScreen();
     // How one link of a queue run went: Saved, Installed, Failed or
     // Cancelled.
