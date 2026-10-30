@@ -2160,8 +2160,14 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
     const float height = ScreenHeight - top;
     const float radius = height / 2;
     constexpr float Cap = 11;
-    constexpr float LetterScale = 0.3f;
     constexpr float IconSize = 11;
+    // The console's system font stands taller than Azahar's at one scale,
+    // so the words and the cap's letter are sized to fit, not fixed.
+    const auto fit = [](float scale, float room) {
+        return scale * std::min(1.0f, room / lineHeight(scale));
+    };
+    const float labelScale = fit(type::Tiny, height - 1);
+    const float letterScale = fit(0.3f, Cap - 1);
     constexpr float Gap = 4;
     constexpr float Outer = 5; // from the screen's edge to the cap
     constexpr float Inner = 9; // clear of the rounded corner
@@ -2169,10 +2175,10 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
     const auto drawCap = [&](const char *letter, float x) {
         fillRound({x, middle - Cap / 2, Cap, Cap}, Cap / 2, color::rgb(0xFFFFFF));
         drawText(letter,
-                 std::round(x + (Cap - textWidth(letter, LetterScale)) / 2 +
-                            inkOffset(letter, LetterScale)),
-                 std::round(middle - lineHeight(LetterScale) / 2 + 1),
-                 LetterScale, color::rgb(0x6C6C6C));
+                 std::round(x + (Cap - textWidth(letter, letterScale)) / 2 +
+                            inkOffset(letter, letterScale)),
+                 std::round(middle - lineHeight(letterScale) / 2 + 1),
+                 letterScale, color::rgb(0x6C6C6C));
         return x + Cap + Gap;
     };
     const auto drawIconPart = [&](const ShoulderKey &key, float x) {
@@ -2186,9 +2192,9 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
         if (key.label.empty()) {
             return x;
         }
-        drawText(key.label, x, std::round(middle - lineHeight(type::Tiny) / 2 + 1),
-                 type::Tiny, color::rgb(0xFFFFFF));
-        return x + textWidth(key.label, type::Tiny) + Gap;
+        drawText(key.label, x, std::round(middle - lineHeight(labelScale) / 2 + 1),
+                 labelScale, color::rgb(0xFFFFFF));
+        return x + textWidth(key.label, labelScale) + Gap;
     };
     const auto draw = [&](const ShoulderKey &key, const char *letter, bool onLeft) {
         if (key.label.empty() && key.icon == Icon::None) {
@@ -2199,7 +2205,7 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
             content += Gap + IconSize;
         }
         if (!key.label.empty()) {
-            content += Gap + textWidth(key.label, type::Tiny);
+            content += Gap + textWidth(key.label, labelScale);
         }
         const float width = std::round(Outer + content + Inner);
         const Rect area = {onLeft ? 0 : TopWidth - width, top, width, height};
