@@ -1081,6 +1081,8 @@ void App::receiveScreen()
     const auto installSent = [&](const net::Received &received, bool deleteAfter) {
         const size_t count = received.install.size();
         size_t done = 0;
+        // Each one that did not go in, with why, for the page.
+        std::vector<std::string> reasons;
         for (size_t index = 0; index < count && ui::keepRunning(); ++index) {
             const std::string &path = received.install[index];
             job.setState("installing",
@@ -1091,20 +1093,39 @@ void App::receiveScreen()
                              ".");
             cia::Info info;
             std::string why;
+            bool already = false;
             const bool ok = readCia(path, info, why) &&
-                            installCia(path, info, deleteAfter, "", true);
-            receiveLog_.installEnded(path, received, ok,
-                                     why.empty() ? "Not installed." : why,
-                                     clockNow());
-            done += ok ? 1 : 0;
+                            installCia(path, info, deleteAfter, "", true,
+                                       &already, &why);
+            const bool went = ok && !already;
+            if (!went) {
+                if (why.empty()) {
+                    why = "It was not installed.";
+                }
+                reasons.push_back(basename(path) + ": " + why);
+                logging::info("receive.install", {{"file", basename(path)},
+                                                  {"why", why}});
+            }
+            receiveLog_.installEnded(path, received, ok, went ? "" : why, clockNow());
+            done += went ? 1 : 0;
+        }
+        // Stopped before the rest: those were never tried.
+        for (size_t index = reasons.size() + done; index < count; ++index) {
+            reasons.push_back(basename(received.install[index]) +
+                              ": 3dsDL closed before it was installed.");
         }
         installed += static_cast<uint32_t>(done);
-        job.finish(done == count
-                       ? (count == 1 ? "Installed " + basename(received.install[0]) + "."
-                                     : "Installed all " + plural(count, "CIA") + ".")
-                       : "Installed " + std::to_string(done) + " of " +
-                             std::to_string(count) + ".",
-                   done == count);
+        std::string text =
+            done == count
+                ? (count == 1 ? "Installed " + basename(received.install[0]) + "."
+                              : "Installed all " + plural(count, "CIA") + ".")
+            : count == 1 ? "Not installed. "
+                         : "Installed " + std::to_string(done) + " of " +
+                               std::to_string(count) + ". ";
+        for (size_t index = 0; index < reasons.size(); ++index) {
+            text += (index > 0 ? " " : "") + reasons[index];
+        }
+        job.finish(text, done == count);
     };
 
     // What a sender handed over: CIAs on the SD card to install, or links.

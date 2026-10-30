@@ -78,10 +78,13 @@ private:
     // quiet skips the success screen, for installing several in a row.
     // True once the CIA's title is installed, including when the same
     // version already was and the person chose to keep it; alreadyInstalled
-    // then says so.
+    // then says so. why, when given, is set to the reason it was not
+    // installed, or to why nothing went in when it was already, for
+    // whoever asked from elsewhere (the Receive page).
     bool installCia(const std::string &path, const cia::Info &info,
                     bool deleteAfter, const std::string &address,
-                    bool quiet = false, bool *alreadyInstalled = nullptr);
+                    bool quiet = false, bool *alreadyInstalled = nullptr,
+                    std::string *why = nullptr);
     void markInstalled(const std::string &address, const std::string &path,
                        const std::string &message);
 

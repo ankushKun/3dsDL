@@ -961,23 +961,30 @@ void App::offerInstall(const std::string &path, const std::string &address,
 
 bool App::installCia(const std::string &path, const cia::Info &info,
                      bool deleteAfter, const std::string &address, bool quiet,
-                     bool *alreadyInstalled)
+                     bool *alreadyInstalled, std::string *why)
 {
     if (alreadyInstalled != nullptr) {
         *alreadyInstalled = false;
     }
+    // Why it stopped, for whoever asked from elsewhere.
+    const auto stopped = [why](const std::string &reason) {
+        if (why != nullptr) {
+            *why = reason;
+        }
+        return false;
+    };
     const std::string name = ciaName(info);
     if (!installer::available()) {
         ui::message("Cannot install", installer::unavailableReason(),
                     ui::Tone::Error);
-        return false;
+        return stopped(installer::unavailableReason());
     }
     if (cia::isSystemTitle(info.titleId)) {
         ui::message("Not installed",
                     "3dsDL does not install system titles. A broken one can "
                     "stop the console from starting.",
                     ui::Tone::Error, cia::titleIdText(info.titleId));
-        return false;
+        return stopped("3dsDL does not install system titles.");
     }
 
     bool isNew3ds = false;
@@ -992,7 +999,8 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         dialog.initial = 1;
         dialog.cancelButton = 1;
         if (ui::choose(dialog) != 0) {
-            return false;
+            return stopped("It only starts on New Nintendo 3DS systems, and "
+                           "Cancel was chosen on the 3DS.");
         }
     }
 
@@ -1051,9 +1059,12 @@ bool App::installCia(const std::string &path, const cia::Info &info,
     const bool isRunning = R_SUCCEEDED(APT_GetProgramID(&running)) &&
                            running == info.titleId;
     bool removeFirst = false;
+    const std::string installedText = screens::titleVersion(info.titleId, installed);
+    const std::string fileText = screens::titleVersion(info.titleId, info.version);
     if (otherSoftware && !isRunning) {
         if (!confirmReplace("Replace " + currentName + "?")) {
-            return false;
+            return stopped("It would replace " + currentName +
+                           ", and Cancel was chosen on the 3DS.");
         }
         // AM takes a newer version in its place. The same or an older one
         // has to be removed first.
@@ -1080,6 +1091,10 @@ bool App::installCia(const std::string &path, const cia::Info &info,
             if (alreadyInstalled != nullptr) {
                 *alreadyInstalled = true;
             }
+            if (why != nullptr) {
+                *why = name + " " + installedText + " is already installed" +
+                       (isRunning ? " and running." : ", and it was kept.");
+            }
             return true;
         }
         removeFirst = true;
@@ -1091,11 +1106,14 @@ bool App::installCia(const std::string &path, const cia::Info &info,
                             "be replaced by this older " +
                             screens::titleVersion(info.titleId, info.version) + ".",
                         ui::Tone::Info);
-            return false;
+            return stopped(name + " " + installedText +
+                           " is installed and running, so this older " +
+                           fileText + " cannot replace it.");
         }
         if (!confirmReplace("A newer version of " + name +
                             " is installed")) {
-            return false;
+            return stopped("A newer " + name + " " + installedText +
+                           " is installed, and Cancel was chosen on the 3DS.");
         }
         removeFirst = true;
     }
@@ -1111,7 +1129,9 @@ bool App::installCia(const std::string &path, const cia::Info &info,
                             units::bytes(static_cast<uint64_t>(free)) +
                             " is free.",
                         ui::Tone::Error);
-            return false;
+            return stopped("It needs " + units::bytes(static_cast<uint64_t>(needed)) +
+                           " on the SD card and " +
+                           units::bytes(static_cast<uint64_t>(free)) + " is free.");
         }
     }
 
@@ -1122,7 +1142,8 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         if (removeFirst && !saveKept) {
             if (!saveBeforeRemoving(info, current, currentName, installed,
                                     saveNote)) {
-                return false;
+                return stopped("The installed " + currentName +
+                               " was kept, as its save data was not backed up.");
             }
             saveKept = true;
         }
@@ -1131,7 +1152,8 @@ bool App::installCia(const std::string &path, const cia::Info &info,
             if (!installer::removeTitle(info.titleId, error)) {
                 ui::message("Could not replace " + currentName, error,
                             ui::Tone::Error);
-                return false;
+                return stopped("Could not remove the installed " + currentName +
+                               ": " + error);
             }
         }
         result = tasks::install(path, info.titleId, name, info.smdh.icon);
@@ -1153,7 +1175,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         if (ui::keepRunning()) {
             ui::message("Install cancelled", result.message);
         }
-        return false;
+        return stopped("The install was stopped on the 3DS.");
     }
     if (result.outcome != installer::Outcome::Installed) {
         if (!address.empty()) {
@@ -1161,7 +1183,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         }
         ui::message("Install failed", result.message, ui::Tone::Error,
                     name);
-        return false;
+        return stopped(result.message);
     }
 
     std::vector<ui::Paragraph> notes;
