@@ -652,6 +652,11 @@ $('#sendform').addEventListener('submit', async e => {
     toast('There are no http or https links in that.', 'bad');
     return;
   }
+  // remote::MaxSentLinks
+  if (links.length > 20) {
+    toast('Send at most 20 links at once.', 'bad');
+    return;
+  }
   b.classList.add('busy');
   try {
     const j = await api('POST', '/send', {links: box.value});

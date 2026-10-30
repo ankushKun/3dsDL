@@ -10,6 +10,9 @@
 // run it against a local fixture server.
 namespace net {
 
+// How many redirects a download follows, and whereTo with it.
+constexpr long MaxRedirects = 10;
+
 enum class Phase { Connecting, Downloading, Restarting };
 
 // Receives updates from the transfer. Every method is called on the thread

@@ -367,7 +367,11 @@ std::string jsonError(int status, const std::string &message)
                         "{\"error\":" + jsonString(message) + "}");
 }
 
-bool apiRequestAllowed(const HttpRequest &request, std::string &why)
+namespace {
+
+// Whether the request was made to the console by its address or a .local
+// name, rather than by a name another site controls (DNS rebinding).
+bool toConsole(const HttpRequest &request)
 {
     const auto host = request.headers.find("host");
     std::string name = host == request.headers.end() ? "" : host->second;
@@ -384,18 +388,33 @@ bool apiRequestAllowed(const HttpRequest &request, std::string &why)
                          inet_aton(name.c_str(), &parsed) != 0;
     const bool local = name.size() > 6 &&
                        name.compare(name.size() - 6, 6, ".local") == 0;
-    if (!address && !local) {
+    return address || local;
+}
+
+bool markedByPage(const HttpRequest &request)
+{
+    const auto marker = request.headers.find("x-requested-with");
+    return marker != request.headers.end() && marker->second == "3dsDL";
+}
+
+} // namespace
+
+bool apiRequestAllowed(const HttpRequest &request, std::string &why)
+{
+    if (!toConsole(request)) {
         why = "Open this page by the console's address.";
         return false;
     }
-    if (request.method != "GET") {
-        const auto marker = request.headers.find("x-requested-with");
-        if (marker == request.headers.end() || marker->second != "3dsDL") {
-            why = "Changes must come from the 3dsDL page.";
-            return false;
-        }
+    if (request.method != "GET" && !markedByPage(request)) {
+        why = "Changes must come from the 3dsDL page.";
+        return false;
     }
     return true;
+}
+
+bool fromOwnPage(const HttpRequest &request)
+{
+    return toConsole(request) && markedByPage(request);
 }
 
 bool localPath(const std::string &root, const std::string &webPath,
@@ -429,6 +448,10 @@ bool localPath(const std::string &root, const std::string &webPath,
 bool sendOptions(const std::string &form, SendOptions &out, std::string &why)
 {
     out = SendOptions();
+    if (extractLinks(formValue(form, "links")).size() > MaxSentLinks) {
+        why = "Send at most " + std::to_string(MaxSentLinks) + " links at once.";
+        return false;
+    }
     const std::string folder = formValue(form, "folder");
     if (!folder.empty()) {
         std::string path;

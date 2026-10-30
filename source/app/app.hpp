@@ -207,8 +207,12 @@ private:
         std::string url;
         std::string folder;
         // The folder came from the link's sender (remote::SendOptions), so
-        // only what remote::sentFileAllowed allows is saved there.
+        // only what remote::sentFileAllowed allows is saved there, and only
+        // from host.
         bool sent = false;
+        // Where the link led when Receive checked it before asking
+        // (net::whereTo); "" when it was not checked or could not be.
+        std::string host;
         State state = State::Waiting;
         std::string message; // why it failed
     };

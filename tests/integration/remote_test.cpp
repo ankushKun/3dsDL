@@ -892,3 +892,67 @@ TEST("remote server: what a sender asks for comes with its links")
     CHECK_EQ(readAll(fbi, 2000).size(), static_cast<size_t>(1));
     ::close(fbi);
 }
+
+TEST("remote server: a send says if 3dsDL's page made it, holds 20 links, and a turned-down device is refused")
+{
+    net::Access access = net::Access::Allowed;
+    net::FileSharing sharing;
+    sharing.access = [&](const std::string &, const std::string &, bool) {
+        return access;
+    };
+    net::Receiver receiver;
+    std::string error;
+    CHECK(receiver.open(0, 0, 0, error));
+    receiver.shareFiles(sharing);
+    const auto post = [&](const std::string &headers, const std::string &body) {
+        const int client = connectTo(receiver.webPort());
+        sendText(client, "POST /send HTTP/1.1\r\n" + headers + "Content-Length: " +
+                             std::to_string(body.size()) + "\r\n\r\n" + body);
+        return client;
+    };
+    const std::string one = "links=https%3A%2F%2Fexample.com%2Fa.3dsx";
+
+    // The page adds its header, by the console's address.
+    std::future<net::Received> sent = receiveOne(receiver);
+    int client = post("Host: 127.0.0.1\r\nX-Requested-With: 3dsDL\r\n", one);
+    CHECK(sent.get().ownPage);
+    readAll(client);
+    ::close(client);
+    // A form on another site cannot add it, and a name another site
+    // controls is not the console's page even with it.
+    for (const char *headers : {"Host: 127.0.0.1\r\n",
+                                "Host: attacker.example\r\nX-Requested-With: 3dsDL\r\n"}) {
+        sent = receiveOne(receiver);
+        client = post(headers, one);
+        CHECK(!sent.get().ownPage);
+        readAll(client);
+        ::close(client);
+    }
+
+    // Twenty links go through; twenty-one are turned away before the console.
+    std::string links = "links=";
+    for (int index = 0; index < 20; ++index) {
+        links += "https%3A%2F%2Fexample.com%2F" + std::to_string(index) + ".3dsx+";
+    }
+    sent = receiveOne(receiver);
+    client = post("Host: 127.0.0.1\r\n", links);
+    CHECK_EQ(sent.get().links.size(), static_cast<size_t>(20));
+    readAll(client);
+    ::close(client);
+    client = post("Host: 127.0.0.1\r\n", links + "https%3A%2F%2Fexample.com%2F20.3dsx");
+    net::Received refused;
+    CHECK(!receiver.wait(1000, refused));
+    std::string response = readAll(client);
+    ::close(client);
+    CHECK(response.rfind("HTTP/1.1 400", 0) == 0);
+    CHECK(response.find("at most 20") != std::string::npos);
+
+    // A device the console turned down sends nothing more.
+    access = net::Access::Denied;
+    client = post("Host: 127.0.0.1\r\nX-Requested-With: 3dsDL\r\n", one);
+    CHECK(!receiver.wait(1000, refused));
+    CHECK(refused.links.empty());
+    response = readAll(client);
+    ::close(client);
+    CHECK(response.rfind("HTTP/1.1 403", 0) == 0);
+}

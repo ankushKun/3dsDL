@@ -34,6 +34,7 @@ A Nintendo 3DS homebrew app (C++17, libctru, citro2d) that downloads files, inst
 ## Receive
 
 - Any web page can call `/send` with `folder=`, `replace=` and `extract=`, so the rules are in `source/core/remote` (`sendOptions`, `sentFileAllowed`, `sameApp`, `sentExtraction`) with host tests, and the console asks before each step. A sender never overwrites anything: a download keeps both on a clash, a replace needs `remote::sameApp` and a yes, and a sent archive only adds to a folder of the same app (`App::sentFolderHoldsSameApp`), with an app it updates put beside the old one for `App::replaceSent` to ask about. Keep new sender options to those terms.
+- Before asking, Receive follows each link's redirects with `net::whereTo` and names the host it reached; `QueuedLink::host` holds the download to it, and one that lands elsewhere is a plain link. Sends not from 3dsDL's own page (`remote::fromOwnPage`: the console's address and the page's header) start on Cancel, `/send` takes at most `remote::MaxSentLinks`, and Don't Allow (offered once a device's links were cancelled) puts it on the same list as the file page's, which the server checks before a send reaches the console.
 
 ## Testing in Azahar
 

@@ -110,6 +110,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.redirect(target)
         if parts == ["redirect-ftp"]:
             return self.redirect("ftp://127.0.0.1/file.bin")
+        if parts == ["redirect-host"]:
+            port = self.server.server_address[1]
+            return self.redirect("http://localhost:%d/file/1000" % port)
         if parts[:1] == ["status"] and len(parts) == 2:
             return self.status(int(parts[1]))
         if parts == ["empty"]:

@@ -246,6 +246,13 @@ with a few hundred files.
 58h. extract=1 on a ZIP of an app already in /3ds/<app>/: its settings file
     in that folder is unchanged afterwards, and the new .3dsx is asked
     about. A ZIP whose top folder is another app's folder is not extracted.
+58i. A link sent by another site (a page with an image tag pointing at
+    /send) asks on the console starting on Cancel; one from 3dsDL's own page
+    starts on Download. Cancel, then send again from the same phone: the
+    question offers Don't Allow, after which the page and its links are
+    refused until Receive closes. Twenty-one links are refused at once.
+58j. A link that redirects (a GitHub release asset) shows the host it ends
+    on before Download, after a short Checking wait that B stops.
 
 ### Saves, tickets and sounds
 

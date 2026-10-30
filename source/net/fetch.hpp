@@ -36,4 +36,16 @@ struct FetchResult {
 
 FetchResult fetch(const FetchRequest &request);
 
+// Where request.url leads once its redirects are followed, as a download of
+// it would be (the same request, redirect limit and protocols), taking only
+// the first byte of the answer. ok when an answer came, whatever its status;
+// url is then the address that gave it.
+struct Destination {
+    bool ok = false;
+    bool cancelled = false;
+    std::string url;
+    std::string message; // for the user when !ok
+};
+Destination whereTo(const FetchRequest &request);
+
 } // namespace net

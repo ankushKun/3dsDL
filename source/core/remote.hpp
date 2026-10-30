@@ -109,6 +109,16 @@ bool apiRequestAllowed(const HttpRequest &request, std::string &why);
 bool localPath(const std::string &root, const std::string &webPath,
                std::string &out);
 
+// Whether a request came from 3dsDL's own page: made to the console's
+// address or .local name, with the X-Requested-With: 3dsDL header the page
+// adds. Another site cannot add that header without the console allowing
+// it, which it never does, so anything else may be a page that sent links
+// without the person asking.
+bool fromOwnPage(const HttpRequest &request);
+
+// The most links one /send may carry, from any page.
+constexpr size_t MaxSentLinks = 20;
+
 // What a link sender may ask for besides the links: folder=/3ds/app (a page
 // path, as the file API takes; /3ds/ or /cias/, or one folder in them)
 // saves apps and archives there instead of the Download Folder;
@@ -117,7 +127,7 @@ bool localPath(const std::string &root, const std::string &webPath,
 // extract an archive into /3ds/ (see SentArchive). Any site can open /send,
 // so a sender can name only the folders in sendFolderAllowed, and nothing
 // is replaced or extracted without a choice on the console. False, with
-// why, for any other folder.
+// why, for any other folder or for more than MaxSentLinks links.
 struct SendOptions {
     std::string folder; // "sdmc:/3ds/app/", or "" for the Download Folder
     bool replace = false;

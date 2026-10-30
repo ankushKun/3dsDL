@@ -1250,6 +1250,14 @@ bool Receiver::serveWeb(int client, const std::string &from, Received &out)
         }
         const std::string &form =
             request.method == "POST" ? request.body : request.query;
+        // A device the console turned down sends nothing more until
+        // Receive closes.
+        if (sharing_.access &&
+            sharing_.access(from, deviceOf(request), false) == Access::Denied) {
+            sendAll(client, remote::jsonError(403, "The 3DS did not allow this device."));
+            closeClient(client);
+            return false;
+        }
         std::string why;
         if (!remote::sendOptions(form, out.options, why)) {
             sendAll(client, remote::httpResponse(400, "text/plain", why + "\n"));
@@ -1259,6 +1267,7 @@ bool Receiver::serveWeb(int client, const std::string &from, Received &out)
         out.links = remote::extractLinks(remote::formValue(form, "links"));
         out.from = from;
         out.device = deviceOf(request);
+        out.ownPage = remote::fromOwnPage(request);
         got = !out.links.empty();
         const auto marker = request.headers.find("x-requested-with");
         if (marker != request.headers.end() && marker->second == "3dsDL") {

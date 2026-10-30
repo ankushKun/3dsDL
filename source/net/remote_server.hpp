@@ -27,6 +27,9 @@ struct Received {
     int replySocket = -1;
     // What a sender to /send asked for besides the links.
     remote::SendOptions options;
+    // Sent by 3dsDL's own page (remote::fromOwnPage) rather than by another
+    // site, which may have sent them without the person asking.
+    bool ownPage = false;
 };
 
 // Tells an FBI tool the links are done, so it can stop serving its files,

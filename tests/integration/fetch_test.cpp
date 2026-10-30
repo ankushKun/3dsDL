@@ -85,3 +85,38 @@ TEST("fetch: stops early when cancelled")
     CHECK(result.cancelled);
     CHECK(std::chrono::steady_clock::now() - started < std::chrono::seconds(3));
 }
+
+TEST("fetch: whereTo follows redirects as a download would")
+{
+    net::FetchRequest request;
+    request.url = fixture("FIXTURE_HTTP") + "/redirect/3";
+    net::Destination destination = net::whereTo(request);
+    CHECK(destination.ok);
+    CHECK_EQ(destination.url, fixture("FIXTURE_HTTP") + "/file/1000");
+
+    // Another host, which is what the console names before it asks.
+    request.url = fixture("FIXTURE_HTTP") + "/redirect-host";
+    destination = net::whereTo(request);
+    CHECK(destination.ok);
+    CHECK(destination.url.rfind("http://localhost:", 0) == 0);
+
+    // An error page still says where the link ends.
+    request.url = fixture("FIXTURE_HTTP") + "/status/404";
+    destination = net::whereTo(request);
+    CHECK(destination.ok);
+    CHECK_EQ(destination.url, request.url);
+
+    // Over HTTPS, and not to anything but HTTP or HTTPS.
+    request.url = fixture("FIXTURE_HTTPS") + "/file/5000";
+    request.caFile = fixture("FIXTURE_CERT");
+    CHECK(net::whereTo(request).ok);
+    request.url = fixture("FIXTURE_HTTP") + "/redirect-ftp";
+    destination = net::whereTo(request);
+    CHECK(!destination.ok);
+    CHECK(!destination.message.empty());
+
+    std::atomic<bool> cancel {true};
+    request.url = fixture("FIXTURE_HTTP") + "/file/400000?slow=1";
+    request.cancel = &cancel;
+    CHECK(net::whereTo(request).cancelled);
+}

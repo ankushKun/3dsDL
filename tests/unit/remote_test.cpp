@@ -433,3 +433,36 @@ TEST("remote: a sender's folder keeps only apps and archives")
         CHECK(!remote::sentFileAllowed(moved));
     }
 }
+
+TEST("remote: only 3dsDL's own page is its own page")
+{
+    remote::HttpRequest request;
+    request.method = "POST";
+    request.headers["host"] = "192.168.1.20";
+    CHECK(!remote::fromOwnPage(request));
+    request.headers["x-requested-with"] = "3dsDL";
+    CHECK(remote::fromOwnPage(request));
+    request.headers["host"] = "3ds.local:80";
+    CHECK(remote::fromOwnPage(request));
+    // A name another site controls, pointed at the console.
+    request.headers["host"] = "attacker.example";
+    CHECK(!remote::fromOwnPage(request));
+    request.headers["host"] = "192.168.1.20";
+    request.headers["x-requested-with"] = "XMLHttpRequest";
+    CHECK(!remote::fromOwnPage(request));
+}
+
+TEST("remote: a send carries at most 20 links")
+{
+    remote::SendOptions options;
+    std::string why;
+    std::string links = "links=";
+    for (size_t index = 0; index < remote::MaxSentLinks; ++index) {
+        links += "https%3A%2F%2Fa.b%2F" + std::to_string(index) + ".cia%0A";
+    }
+    CHECK(remote::sendOptions(links, options, why));
+    CHECK(!remote::sendOptions(links + "https%3A%2F%2Fa.b%2Fmore.cia&folder=%2F3ds",
+                               options, why));
+    CHECK(why.find("20") != std::string::npos);
+    CHECK(options.folder.empty());
+}

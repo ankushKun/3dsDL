@@ -28,7 +28,6 @@ namespace {
 
 constexpr size_t FileBufferSize = 256 * 1024;
 constexpr long CurlBufferSize = 128 * 1024;
-constexpr long MaxRedirects = 10;
 // A download starts over at most twice: once when the file changed since the
 // partial download, and once more on one connection when the server
 // mishandles ranges.
