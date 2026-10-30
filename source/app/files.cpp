@@ -3,6 +3,7 @@
 #include "app_util.hpp"
 #include "audio_meta.hpp"
 #include "cia.hpp"
+#include "favorites.hpp"
 #include "file_ops.hpp"
 #include "file_types.hpp"
 #include "fs_util.hpp"
@@ -67,6 +68,12 @@ std::string folderTitle(const std::string &folder)
 {
     return naming::parentFolder(folder) == folder ? "SD Card"
                                                   : fileops::name(folder);
+}
+
+// How favourites name an entry: folders end in '/', as Files browses them.
+std::string favoritePath(const std::string &folder, const fs::Entry &entry)
+{
+    return folder + entry.name + (entry.folder ? "/" : "");
 }
 
 std::string sizeText(int64_t size)
@@ -893,6 +900,7 @@ void App::browseFiles(const std::string &select)
     }
     std::string &current = filesFolder_;
     int cursor = 0;
+    float scroll = -1; // where the rows were, kept while the folder stays
     std::vector<std::string> marked;
     std::map<std::string, Details> details;
 
@@ -985,6 +993,9 @@ void App::browseFiles(const std::string &select)
             fs::sortEntries(entries, settings_.fileSort, settings_.fileSortReverse);
             waiting.clear();
             incoming.clear();
+            if (readFolder != current) {
+                scroll = -1;
+            }
             readFolder = current;
             complete = false;
             sizer.stop();
@@ -1028,11 +1039,10 @@ void App::browseFiles(const std::string &select)
         spec.actionKey = "Y";
         spec.actionKeys = KEY_Y;
         spec.longPressKey = KEY_Y;
-        spec.extraKeys = KEY_SELECT | KEY_START;
-        spec.headingAction = "Sort";
+        // R stars the highlighted entry, and L opens what is starred.
+        spec.extraKeys = KEY_SELECT | KEY_START | KEY_R;
         // X sorts, as on the Software lists.
-        spec.headingActionKey = "X";
-        spec.headingActionKeys = KEY_X;
+        spec.headingActions = {{"Favourites", "L", KEY_L}, {"Sort", "X", KEY_X}};
         const auto hint = [&]() {
             return !marked.empty() ? std::to_string(marked.size()) + " marked"
                  : !clipboard_.empty()
@@ -1041,6 +1051,10 @@ void App::browseFiles(const std::string &select)
                      : "";
         };
         spec.hint = hint();
+        std::set<std::string> starred;
+        for (const std::string &favorite : settings_.favorites) {
+            starred.insert(favorites::key(favorite));
+        }
         const auto buildItems = [&]() {
             spec.items.clear();
             spec.items.reserve(entries.size());
@@ -1054,6 +1068,10 @@ void App::browseFiles(const std::string &select)
                 item.iconColor = look.color;
                 item.labelColor = entry.name[0] == '.' ? ui::color::InkSoft
                                                        : ui::color::InkButton;
+                if (!starred.empty() &&
+                    starred.count(favorites::key(favoritePath(current, entry))) > 0) {
+                    item.flag = ui::Icon::Star;
+                }
                 item.marked = markedSet.count(current + entry.name) > 0;
                 if (item.marked) {
                     item.badge = "Marked";
@@ -1237,7 +1255,7 @@ void App::browseFiles(const std::string &select)
                          preview.show(kindOf(entry) == Kind::Image ? path : ""));
         };
 
-        const ui::ListResult result = ui::runList(spec, cursor);
+        const ui::ListResult result = ui::runList(spec, cursor, &scroll);
         // Whatever comes next has the SD card to itself; the sizes still
         // missing are added up again on the way back. What changed on the
         // card before this point is caught now, before the next action.
@@ -1281,6 +1299,25 @@ void App::browseFiles(const std::string &select)
                 }
                 cursor = std::min(cursor + 1,
                                   static_cast<int>(entries.size()) - 1);
+            }
+            continue;
+        }
+        if (result.key == KEY_R) {
+            if (onEntry) {
+                toggleFavorite(favoritePath(current, entries[position]));
+            }
+            continue;
+        }
+        if (result.key == KEY_L) {
+            const std::string chosen = favoritesScreen();
+            if (!chosen.empty()) {
+                // A folder opens; a file is highlighted in its folder.
+                const bool folder = chosen.back() == '/';
+                current = folder ? chosen : folderOf(chosen);
+                landOn = folder ? "" : fileops::name(chosen);
+                cursor = 0;
+                marked.clear();
+                reload = true;
             }
             continue;
         }
@@ -1370,6 +1407,129 @@ void App::browseFiles(const std::string &select)
         landOn = entry.name;
         reload = true;
     }
+}
+
+void App::toggleFavorite(const std::string &path)
+{
+    const bool added = favorites::toggle(settings_.favorites, path);
+    persistSettings();
+    ui::Notice notice;
+    notice.title = added ? "Added to Favourites" : "Removed from Favourites";
+    notice.text = fileops::name(path);
+    notice.icon = ui::Icon::Star;
+    notice.iconColor = ui::color::IconGold;
+    ui::notify(notice);
+}
+
+std::string App::favoritesScreen()
+{
+    int cursor = 0;
+    float scroll = -1;
+    PreviewLoader preview;
+    std::map<std::string, Details> details;
+    while (ui::keepRunning()) {
+        // Each is looked for once as the list opens, not every frame.
+        struct Row {
+            std::string favorite;
+            std::string path; // without the '/' a folder's favourite ends in
+            fs::Entry entry;
+            bool present = false;
+        };
+        std::vector<Row> rows;
+        for (const std::string &favorite : settings_.favorites) {
+            Row row;
+            row.favorite = favorite;
+            row.entry.folder = favorite.back() == '/';
+            row.path = row.entry.folder ? favorite.substr(0, favorite.size() - 1)
+                                        : favorite;
+            row.entry.name = fileops::name(row.path);
+            if (row.entry.folder) {
+                row.present = fs::directoryExists(row.path);
+                fileops::Totals totals;
+                if (fileIndex_.total(row.path, totals)) {
+                    row.entry.size = static_cast<int64_t>(totals.bytes);
+                }
+            } else {
+                row.entry.size = fs::fileSize(row.path);
+                row.present = row.entry.size >= 0;
+            }
+            rows.push_back(row);
+        }
+
+        ui::ListSpec spec;
+        spec.title = "Favourites";
+        spec.emptyText = "Press R on a folder or file to add it.";
+        for (const Row &row : rows) {
+            ui::ListItem item;
+            const KindLook look = lookOf(kindOf(row.entry));
+            item.key = row.favorite;
+            item.label = row.entry.name;
+            item.icon = look.icon;
+            item.iconColor = look.color;
+            if (row.present) {
+                item.detail = folderTitle(folderOf(row.path));
+            } else {
+                item.labelColor = ui::color::InkSoft;
+                item.badge = "Missing";
+                item.badgeColor = ui::color::Neutral;
+            }
+            spec.items.push_back(item);
+        }
+        if (!rows.empty()) {
+            spec.action = "Remove";
+            spec.actionKey = "R";
+            spec.actionKeys = KEY_R;
+        }
+        spec.extraKeys = KEY_L; // L closes what it opened
+        spec.drawTop = [&](int index) {
+            ui::drawTopChrome("Favourites", ui::Icon::Star, ui::color::IconGold);
+            if (index < 0 || index >= static_cast<int>(rows.size())) {
+                ui::drawPanel();
+                ui::drawEmblem(ui::Icon::Star, ui::color::IconGold);
+                preview.show("");
+                return;
+            }
+            const Row &row = rows[index];
+            const Kind kind = kindOf(row.entry);
+            if (!row.present) {
+                drawEntryPanel({}, kind, row.entry.name, row.favorite, {});
+                preview.show("");
+                return;
+            }
+            auto found = details.find(row.path);
+            if (found == details.end()) {
+                found = details.emplace(row.path, loadDetails(row.path, kind)).first;
+            }
+            drawEntryTop(row.path, row.entry, found->second,
+                         preview.show(kind == Kind::Image ? row.path : ""));
+        };
+
+        const ui::ListResult result = ui::runList(spec, cursor, &scroll);
+        preview.stop();
+        const bool onRow =
+            result.index >= 0 && result.index < static_cast<int>(rows.size());
+        if (result.key == KEY_R && onRow) {
+            toggleFavorite(rows[result.index].favorite);
+            continue;
+        }
+        if (result.key != KEY_A || !onRow) {
+            return "";
+        }
+        const Row &row = rows[result.index];
+        if (row.present) {
+            return row.favorite;
+        }
+        ui::Dialog dialog;
+        dialog.header = "Favourites";
+        dialog.title = row.entry.name + " is no longer on the SD card.";
+        dialog.body.push_back({row.favorite, ui::color::Muted, 0.46f, 2});
+        dialog.buttons = {"Remove", "Keep"};
+        dialog.cancelButton = 1;
+        if (ui::choose(dialog) == 0) {
+            toggleFavorite(row.favorite);
+        }
+    }
+    return "";
 }
 
 void App::openFile(const std::string &path,
@@ -1583,6 +1743,7 @@ bool App::entryOptions(const std::string &folder,
         Checksum,
         Mark,
         ClearMarks,
+        Favorite,
         Folder
     };
     std::vector<ui::MenuItem> items;
@@ -1618,6 +1779,7 @@ bool App::entryOptions(const std::string &folder,
     }
     const bool isMarked =
         single && std::find(marked.begin(), marked.end(), path) != marked.end();
+    const std::string favorite = path + (isFolder ? "/" : "");
 
     if (single && kind == Kind::Cia) {
         add("Install", Action::Install);
@@ -1654,6 +1816,9 @@ bool App::entryOptions(const std::string &folder,
     }
     if (single) {
         add(isMarked ? "Unmark" : "Mark", Action::Mark);
+        add(favorites::contains(settings_.favorites, favorite) ? "Unfavourite"
+                                                               : "Favourite",
+            Action::Favorite);
     } else {
         add("Clear Marks", Action::ClearMarks);
     }
@@ -1770,6 +1935,9 @@ bool App::entryOptions(const std::string &folder,
     case Action::ClearMarks:
         marked.clear();
         return false;
+    case Action::Favorite:
+        toggleFavorite(favorite);
+        return false;
     case Action::Folder:
         return folderOptions(folder, entries, complete, marked);
     }
@@ -1790,6 +1958,7 @@ bool App::folderOptions(const std::string &folder,
         MarkAll,
         ClearMarks,
         InstallAll,
+        Favorite,
         Properties
     };
     std::vector<ui::MenuItem> items;
@@ -1825,6 +1994,12 @@ bool App::folderOptions(const std::string &folder,
     }
     if (cias > 0) {
         add("Install All CIAs", Action::InstallAll, complete);
+    }
+    const bool atRoot = naming::parentFolder(folder) == folder;
+    if (!atRoot) {
+        add(favorites::contains(settings_.favorites, folder) ? "Unfavourite"
+                                                             : "Favourite",
+            Action::Favorite);
     }
     add("Properties", Action::Properties);
 
@@ -1898,6 +2073,9 @@ bool App::folderOptions(const std::string &folder,
         }
         return false;
     }
+    case Action::Favorite:
+        toggleFavorite(folder);
+        return false;
     case Action::Properties: {
         std::string path = folder;
         if (path.size() > 6 && path.back() == '/') {
@@ -2051,11 +2229,12 @@ bool App::renameEntry(const std::string &path)
             ui::message("Could not rename", error, ui::Tone::Error);
             return true;
         }
-        return true;
-    }
-    if (!fileops::move(path, target, error)) {
+    } else if (!fileops::move(path, target, error)) {
         ui::message("Could not rename", error, ui::Tone::Error);
         return false;
+    }
+    if (favorites::moved(settings_.favorites, path, target)) {
+        persistSettings();
     }
     return true;
 }
@@ -2107,13 +2286,23 @@ bool App::deleteEntries(const std::vector<std::string> &paths)
             return all;
         });
 
-    // Copied entries that no longer exist cannot be pasted.
+    // Copied entries that no longer exist cannot be pasted, and they are
+    // no longer favourites.
     fileops::Lookup lookup;
     clipboard_.erase(std::remove_if(clipboard_.begin(), clipboard_.end(),
                                     [&](const std::string &path) {
                                         return !lookup.exists(path);
                                     }),
                      clipboard_.end());
+    bool unstarred = false;
+    for (const std::string &path : paths) {
+        if (!lookup.exists(path)) {
+            unstarred |= favorites::removed(settings_.favorites, path);
+        }
+    }
+    if (unstarred) {
+        persistSettings();
+    }
     if (result.status == fileops::Status::Failed) {
         ui::message("Delete stopped", result.message, ui::Tone::Error,
                     plural(result.files, "file") + " deleted before that.");
@@ -2261,7 +2450,7 @@ bool App::pasteInto(const std::string &folder)
     }
 
     // Moved items are no longer where the clipboard points; anything that
-    // did not move stays ready to try again.
+    // did not move stays ready to try again. Favourites follow what moved.
     if (clipboardCut_) {
         fileops::Lookup moved;
         clipboard_.erase(std::remove_if(clipboard_.begin(), clipboard_.end(),
@@ -2269,6 +2458,21 @@ bool App::pasteInto(const std::string &folder)
                                             return !moved.exists(path);
                                         }),
                          clipboard_.end());
+        bool followed = false;
+        for (const Step &step : steps) {
+            if (!moved.exists(step.source)) {
+                // What it replaced was deleted.
+                if (step.replace) {
+                    followed |= favorites::removed(settings_.favorites,
+                                                   step.destination);
+                }
+                followed |= favorites::moved(settings_.favorites, step.source,
+                                             step.destination);
+            }
+        }
+        if (followed) {
+            persistSettings();
+        }
     }
     if (result.status == fileops::Status::Failed) {
         problems.insert(problems.begin(), result.message);

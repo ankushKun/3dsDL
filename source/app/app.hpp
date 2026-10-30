@@ -91,6 +91,10 @@ private:
     // entry to open Files on, highlighted in its folder.
     void filesScreen(const std::string &select = "");
     void browseFiles(const std::string &select = "");
+    // Stars path (see favorites.hpp) or takes its star away, and says so.
+    void toggleFavorite(const std::string &path);
+    // The starred folders and files. Returns the favourite chosen, or "".
+    std::string favoritesScreen();
     // folder, when given, is the whole folder path is in, already read and
     // sorted, for the picture viewer's previous and next.
     void openFile(const std::string &path,

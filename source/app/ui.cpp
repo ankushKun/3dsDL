@@ -2349,9 +2349,14 @@ void drawNotice()
 
 void notify(const Notice &value)
 {
+    // One that is down stays down, so notices in quick succession do not
+    // bounce; its line starts again.
+    const uint64_t age = now() - noticeStart;
+    const bool down = noticeActive && !inDialog && age >= NoticeIn &&
+                      age <= NoticeIn + NoticeHold;
     notice = value;
     noticeActive = true;
-    noticeStart = now();
+    noticeStart = down ? now() - NoticeIn : now();
     sound::play(sound::Effect::Notify);
 }
 
@@ -2932,7 +2937,8 @@ int menu(const std::vector<MenuItem> &items,
     } else {
         const size_t rows = (count + 1) / 2;
         const float pitch = std::min(40.0f, 196.0f / rows);
-        const float height = pitch - 8;
+        // The gaps give way before the buttons go under 24 px.
+        const float height = std::max(pitch - 8, std::min(24.0f, pitch - 3));
         const float top = 6 + (196 - pitch * rows) / 2 + 4;
         for (size_t index = 0; index < count; ++index) {
             Control control;
@@ -3092,12 +3098,12 @@ void Scroller::reveal(float top, float height, float viewport)
 // --- Lists -----------------------------------------------------------------------
 
 namespace {
-ListResult runListQuietly(const ListSpec &spec, int &cursor);
+ListResult runListQuietly(const ListSpec &spec, int &cursor, float *offset);
 }
 
-ListResult runList(const ListSpec &spec, int &cursor)
+ListResult runList(const ListSpec &spec, int &cursor, float *offset)
 {
-    const ListResult result = runListQuietly(spec, cursor);
+    const ListResult result = runListQuietly(spec, cursor, offset);
     if (result.key == KEY_B) {
         sound::play(sound::Effect::Back);
     } else if (result.key != 0) {
@@ -3108,7 +3114,7 @@ ListResult runList(const ListSpec &spec, int &cursor)
 
 namespace {
 
-ListResult runListQuietly(const ListSpec &spec, int &cursor)
+ListResult runListQuietly(const ListSpec &spec, int &cursor, float *offset)
 {
     enterScreen("list|" + spec.title + "|" + spec.heading + "|" + spec.back +
                 "|" + spec.action);
@@ -3122,16 +3128,37 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
     const Rect backTab = tabRect(Tab::Left);
     const Rect actionTab = tabRect(Tab::Right, spec.action, spec.actionKey);
     const Rect inner = {recess.x, recess.y + 4, recess.w, recess.h - 8};
-    const bool headingAction = headed && !spec.headingAction.empty();
-    const u32 headingKey =
-        spec.headingActionKeys & (~spec.headingActionKeys + 1);
-    const float headingWidth = keyCapWidth(spec.headingActionKey) +
-                               textWidth(spec.headingAction, type::Small);
-    const Rect headingRect = {recess.x + recess.w - 2 - headingWidth, 0,
-                              headingWidth, listTop - 2};
-    // Wider and taller than its ink, to be easy to hit.
-    const Rect headingHit = {headingRect.x - 8, 0, headingRect.w + 14,
-                             listTop + 2};
+    // The heading's actions, laid out leftwards from the recess's right end.
+    struct Placed {
+        Rect ink;
+        Rect hit; // wider and taller than its ink, to be easy to hit
+        u32 key;  // reported for a tap
+    };
+    std::vector<Placed> placed(headed ? spec.headingActions.size() : 0);
+    u32 headingKeys = 0;
+    float headingRight = recess.x + recess.w - 2;
+    for (size_t index = placed.size(); index-- > 0;) {
+        const HeadingAction &action = spec.headingActions[index];
+        const float width =
+            keyCapWidth(action.key) + textWidth(action.label, type::Small);
+        const Rect ink = {headingRight - width, 0, width, listTop - 2};
+        placed[index] = {ink, {ink.x - 8, 0, ink.w + 14, listTop + 2},
+                         action.keys & (~action.keys + 1)};
+        headingKeys |= action.keys;
+        headingRight = ink.x - 14; // clear of the next one's hit area
+    }
+    const auto headingAt = [&](const touchPosition &point) {
+        for (size_t index = 0; index < placed.size(); ++index) {
+            if (placed[index].hit.contains(point)) {
+                return static_cast<int>(index);
+            }
+        }
+        return -1;
+    };
+    // L and R page through the rows unless the list gives them a job.
+    const u32 taken = spec.actionKeys | headingKeys | spec.extraKeys;
+    const u32 pageUpKeys = (KEY_LEFT | KEY_L) & ~taken;
+    const u32 pageDownKeys = (KEY_RIGHT | KEY_R) & ~taken;
     const float viewport = inner.h;
     const float rowLeft = recess.x + 7;
     // Worked out again whenever spec.update changes the rows.
@@ -3149,12 +3176,29 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
 
     cursor = count == 0 ? -1 : std::max(0, std::min(cursor, count - 1));
     Scroller scroller;
-    if (cursor > 0) {
+    if (offset != nullptr && *offset >= 0) {
+        // Where it was, moved only as far as the highlighted row needs.
+        const float top = cursor * Pitch;
+        const float start = std::min(*offset, std::max(0.0f, content - viewport));
+        scroller.setOffset(
+            std::max(0.0f, std::max(std::min(start, top), top + Pitch - viewport)));
+    } else if (cursor > 0) {
         const float top = cursor * Pitch;
         scroller.setOffset(std::max(0.0f, std::min(top - viewport / 2 + Pitch / 2,
                                                    content - viewport)));
     }
-    int tabPressed = 0; // -1 back, 1 action, 2 the heading's button
+    // Hands back where the rows were, however the list closes.
+    struct KeepOffset {
+        float *into;
+        const Scroller &from;
+        ~KeepOffset()
+        {
+            if (into != nullptr) {
+                *into = from.offset();
+            }
+        }
+    } keepOffset {offset, scroller};
+    int tabPressed = 0; // -1 back, 1 action, 2 + n the heading's nth action
     bool touched = false; // the person has moved the highlight or the rows
     const u32 actionKey = spec.actionKeys & (~spec.actionKeys + 1);
 
@@ -3236,10 +3280,10 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
             if (input.repeat & KEY_DOWN) {
                 target = cursor + 1 < count ? cursor + 1 : 0;
             }
-            if (input.repeat & (KEY_LEFT | KEY_L)) {
+            if (input.repeat & pageUpKeys) {
                 target = std::max(0, cursor - pageRows);
             }
-            if (input.repeat & (KEY_RIGHT | KEY_R)) {
+            if (input.repeat & pageDownKeys) {
                 target = std::min(count - 1, cursor + pageRows);
             }
             if (target != cursor) {
@@ -3258,8 +3302,8 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
         if (input.down & spec.actionKeys) {
             return {input.down & spec.actionKeys, cursor};
         }
-        if (headingAction && (input.down & spec.headingActionKeys)) {
-            return {input.down & spec.headingActionKeys, cursor};
+        if (input.down & headingKeys) {
+            return {input.down & headingKeys, cursor};
         }
         if (input.down & spec.extraKeys) {
             return {input.down & spec.extraKeys, cursor};
@@ -3267,23 +3311,24 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
 
         // Tabs press on touch and act on release.
         if (input.down & KEY_TOUCH) {
+            const int heading = headingAt(input.touch);
             tabPressed = !spec.back.empty() && backTab.contains(input.touch) ? -1
                          : !spec.action.empty() && actionTab.contains(input.touch)
                              ? 1
-                         : headingAction && headingHit.contains(input.touch) ? 2
-                                                                             : 0;
+                         : heading >= 0 ? 2 + heading
+                                        : 0;
         }
         if ((input.up & KEY_TOUCH) && tabPressed != 0) {
             const Rect area = tabPressed < 0    ? backTab
                               : tabPressed == 1 ? actionTab
-                                                : headingHit;
+                                                : placed[tabPressed - 2].hit;
             const int which = tabPressed;
             tabPressed = 0;
             if (area.contains(input.touch)) {
                 if (which < 0) {
                     return {KEY_B, cursor};
                 }
-                return {which == 2 ? headingKey : actionKey, cursor};
+                return {which == 1 ? actionKey : placed[which - 2].key, cursor};
             }
         }
 
@@ -3343,16 +3388,21 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
             drawTopChrome(spec.title);
         }
         beginBottom();
-        if (headingAction) {
+        if (!placed.empty()) {
             drawMarquee(spec.heading, recess.x + 2, 2, type::Small,
-                        color::rgb(0x63593F), headingRect.x - recess.x - 12);
-            const bool down = tabPressed == 2 && (input.held & KEY_TOUCH) &&
-                              headingHit.contains(input.touch);
-            const u32 ink = down ? color::InkStrong : color::rgb(0x63593F);
-            const Rect line = {headingRect.x, 1, headingRect.w, listTop - 3};
-            const float x = drawKeyCap(spec.headingActionKey, headingRect.x, line,
-                                       ink, color::rgb(0xF4EFD6));
-            drawText(spec.headingAction, x, 2, type::Small, ink);
+                        color::rgb(0x63593F), placed.front().ink.x - recess.x - 12);
+            for (size_t index = 0; index < placed.size(); ++index) {
+                const Placed &action = placed[index];
+                const bool down = tabPressed == 2 + static_cast<int>(index) &&
+                                  (input.held & KEY_TOUCH) &&
+                                  action.hit.contains(input.touch);
+                const u32 ink = down ? color::InkStrong : color::rgb(0x63593F);
+                const Rect line = {action.ink.x, 1, action.ink.w, listTop - 3};
+                const float x = drawKeyCap(spec.headingActions[index].key,
+                                           action.ink.x, line, ink,
+                                           color::rgb(0xF4EFD6));
+                drawText(spec.headingActions[index].label, x, 2, type::Small, ink);
+            }
         } else if (headed) {
             drawMarquee(spec.heading, 160, 2, type::Small, color::rgb(0x63593F),
                         296, C2D_AlignCenter);
@@ -3411,6 +3461,10 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor)
                                       row.y, 120, row.h},
                              type::Tiny, color::InkSoft, true);
                 right -= textWidth(detail, type::Tiny) + 8;
+            }
+            if (item.flag != Icon::None) {
+                drawIcon(item.flag, right - 13, row.y + 6, 13, item.flagColor);
+                right -= 13 + 6;
             }
             // Only the highlighted row scrolls, as on the system's lists.
             if (index == cursor && !scroller.dragging()) {

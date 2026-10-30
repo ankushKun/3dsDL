@@ -402,6 +402,9 @@ struct ListItem {
     u32 iconColor = color::IconGrey;
     std::string badge; // replaces detail with a coloured badge
     u32 badgeColor = color::Badge;
+    // A small icon before the detail or badge, such as a favourite's star.
+    Icon flag = Icon::None;
+    u32 flagColor = color::IconGold;
     // From 0 to 1: a thin bar along the foot of the row, for something on
     // its way. Below 0 draws none.
     float progress = -1;
@@ -410,18 +413,23 @@ struct ListItem {
     std::string key;
 };
 
+// An action at the right end of a list's heading, as a key cap and a word
+// like the tabs but plain, such as Files' Sort. Its keys or a tap on it
+// close the list, reporting its key.
+struct HeadingAction {
+    std::string label;
+    std::string key; // its key cap
+    u32 keys = 0;
+};
+
 struct ListSpec {
     std::string header;   // unused, kept for older callers
     std::string title;    // the top screen's title when drawTop is unset
     // A small line above the list on the bottom screen, for what the top
     // screen does not already say, such as the folder being browsed.
     std::string heading;
-    // An action at the right end of the heading, as a key cap and a word
-    // like the tabs but plain, such as Files' Sort. Its keys or a tap on it
-    // close the list, reporting its key.
-    std::string headingAction;
-    std::string headingActionKey; // its key cap
-    u32 headingActionKeys = 0;
+    // Actions at the heading's right end, left to right.
+    std::vector<HeadingAction> headingActions;
     std::vector<ListItem> items;
     std::string emptyText;
     std::string back = "Back";
@@ -446,9 +454,13 @@ struct ListResult {
     int index = -1; // highlighted item
 };
 
-// Rows scroll smoothly: drag them, flick them, or move with the D-pad, L
-// and R. A tap highlights a row and a tap on the highlighted row opens it.
-ListResult runList(const ListSpec &spec, int &cursor);
+// Rows scroll smoothly: drag them, flick them, or move with the D-pad, and
+// with L and R unless the list's keys give them a job. A tap highlights a
+// row and a tap on the highlighted row opens it. offset, when given, is
+// where the rows are scrolled to, below 0 for none yet: the list opens
+// there, with the highlighted row in view, and leaves it there, so a screen
+// that closes the list for a key and opens it again stays in place.
+ListResult runList(const ListSpec &spec, int &cursor, float *offset = nullptr);
 
 // Touch scrolling with momentum for anything taller than its box.
 class Scroller {
@@ -554,7 +566,8 @@ struct Notice {
 
 // Slides notice down from under the status bar over whatever the top screen
 // shows, keeps it there for a few seconds and slides it away, the way the
-// HOME Menu shows its notifications. A new notice replaces the current one.
+// HOME Menu shows its notifications. A new notice replaces the current one,
+// in its place when that one is down.
 void notify(const Notice &notice);
 
 // Runs at the start of every frame on the main thread, whichever screen is

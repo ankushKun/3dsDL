@@ -2,7 +2,7 @@
 """Renders 3dsDL's interface icons into one atlas for the console.
 
 The icons are the 24 px stroke drawings from the design canvas (see
-docs/DESIGN.md), apart from the filled settings cog. Each is drawn white on transparent at 64, 32, 24 and 18 px
+docs/DESIGN.md), apart from the filled settings cog and star. Each is drawn white on transparent at 64, 32, 24 and 18 px
 by headless Chrome, and the app tints them when it draws them.
 
 Writes romfs/ui/icons.png and source/app/icon_atlas.hpp. Run it again after
@@ -48,6 +48,8 @@ ICONS = [
     ("Check", '<path d="M5 12.5l4.5 4.5L19 7.5"/>'),
     ("Chip", '<rect x="6" y="6" width="12" height="12" rx="1.5"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>'),
     ("Lock", '<rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
+    # Filled, so a favourite's star still reads as one beside a row's size.
+    ("Star", '<path fill="#fff" d="M12 3.6L14.29 9.44L20.56 9.82L15.71 13.81L17.29 19.88L12 16.5L6.71 19.88L8.29 13.81L3.44 9.82L9.71 9.44Z"/>'),
 ]
 
 SIZES = [64, 32, 24, 18]

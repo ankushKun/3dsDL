@@ -126,15 +126,19 @@ first guess is cap 15 at scale 0.72.
 ### Lists
 
 A recessed panel holds rows 27 px tall on a 31 px pitch: white pills with a
-17 px icon, the name and a right-aligned size or badge. Six rows fit; L/R and
-the counter page through the rest. In every list a tap highlights a row and
+17 px icon, the name and a right-aligned size or badge, with a small gold
+star before it on Files' favourites. Six rows fit; the D-pad's left and
+right, L/R and the counter page through the rest. A list that gives L or R
+a job of its own, as Files does, pages with the D-pad only. In every list a tap highlights a row and
 a tap on the highlighted row opens it. Marked rows turn light blue with a Marked
 badge. The scrollbar's column takes a drag: the thumb follows the stylus, and
 a touch on the track brings the thumb's middle there. A list that fills in
 while open keeps the row at the top of the view in place as rows arrive above
-it; only a list nobody has touched stays at its first row. A list can put an
-action at the right end of its heading for what changes the whole list, as a
-key cap and a word in the heading's ink (Files' X Sort, matching the Software lists' X Sort tab), never a pill. A row on its way carries a thin progress bar along its foot.
+it; only a list nobody has touched stays at its first row. A list can put
+actions at the right end of its heading for what changes or leaves the
+whole list, each a key cap and a word in the heading's ink (Files' L
+Favourites and X Sort, matching the Software lists' X Sort tab), never a
+pill. A row on its way carries a thin progress bar along its foot.
 
 ### Dialogs
 
@@ -155,7 +159,8 @@ strip for a red button and a 30 px dark Cancel strip.
 | Install prompt | icon, name, publisher, Title ID, Version, Size | Install, Install and Delete File, Keep File |
 | Installing | icon, name, progress | do not turn off |
 | Installed | icon, name, time taken | dialog: Close / Launch |
-| Files | details of the highlighted entry; a picture's preview, a song's cover | path, six rows, Back, page counter, Options |
+| Files | details of the highlighted entry; a picture's preview, a song's cover | path, L Favourites and X Sort, six rows, Back, page counter, Options; R stars the highlighted entry |
+| Favourites | details of the highlighted favourite, as Files shows it | starred folders and files in the order they were starred, each with its folder, or Missing; Back, R Remove; A opens a folder, or a file's folder with it highlighted |
 | File options | the file the choices act on | eight small buttons in two columns |
 | Picture viewer | the picture, nothing else | name, size, position, Previous / Next |
 | Song viewer | title, cover, artist, album, length, track | name, format, position, Previous / Next |
@@ -177,12 +182,13 @@ strip for a red button and a 30 px dark Cancel strip.
 
 ### Notifications
 
-News that is not a question, such as a new version of 3dsDL, slides down
-from under the status bar over whatever the top screen shows, like the HOME
-Menu's notifications. A card 336 by 50 at y 22: white to cream, radius 12, a
+News that is not a question, such as a new version of 3dsDL or a star
+added in Files, slides down from under the status bar over whatever the top
+screen shows, like the HOME Menu's notifications. A card 336 by 50 at y 22: white to cream, radius 12, a
 48 px app-coloured square with a white icon, a title in small type and one
 line under it. A thin line under the text runs out over the six seconds it
-stays, then the card slides back up. It waits while a dialog is open. The
+stays, then the card slides back up. A notice that arrives while one is
+down takes its place without sliding in again. It waits while a dialog is open. The
 control it points to (Settings, then Updates) carries an orange "New" badge
 on its top right corner, drawn over the focus ring.
 
