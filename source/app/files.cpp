@@ -47,6 +47,15 @@ using screens::versionRow;
 constexpr uint16_t PictureBackground = 0x0883;
 // Covers sit on white, as title icons do.
 constexpr uint16_t CoverBackground = 0xffff;
+// R's shoulder tab: the star R would add, or the gold one it would take
+// away, brighter on the grey than on a row.
+ui::ShoulderKey starKey(bool starred)
+{
+    ui::ShoulderKey key;
+    key.icon = starred ? ui::Icon::Star : ui::Icon::StarOutline;
+    key.iconColor = starred ? ui::color::rgb(0xFFCC33) : ui::color::rgb(0xFFFFFF);
+    return key;
+}
 // Previews in Files sit on the panel's colour, so transparent parts show it.
 constexpr uint16_t PreviewBackground = 0xdeb3;
 // The box a picture's preview fits in, on the Files top screen.
@@ -994,7 +1003,14 @@ void App::browseFiles(const std::string &select)
             waiting.clear();
             incoming.clear();
             if (readFolder != current) {
+                // Another folder opens at its top, with nothing marked.
+                cursor = 0;
                 scroll = -1;
+                marked.clear();
+            }
+            if (!filesLandOn_.empty()) {
+                landOn = filesLandOn_;
+                filesLandOn_.clear();
             }
             readFolder = current;
             complete = false;
@@ -1039,10 +1055,11 @@ void App::browseFiles(const std::string &select)
         spec.actionKey = "Y";
         spec.actionKeys = KEY_Y;
         spec.longPressKey = KEY_Y;
-        // R stars the highlighted entry, and L opens what is starred.
-        spec.extraKeys = KEY_SELECT | KEY_START | KEY_R;
+        // L opens Favourites and R stars the highlighted entry, as the top
+        // screen's corners say.
+        spec.extraKeys = KEY_SELECT | KEY_START | KEY_L | KEY_R;
         // X sorts, as on the Software lists.
-        spec.headingActions = {{"Favourites", "L", KEY_L}, {"Sort", "X", KEY_X}};
+        spec.headingActions = {{"Sort", "X", KEY_X}};
         const auto hint = [&]() {
             return !marked.empty() ? std::to_string(marked.size()) + " marked"
                  : !clipboard_.empty()
@@ -1228,11 +1245,15 @@ void App::browseFiles(const std::string &select)
                         clipboardFact(clipboard_.size(), clipboardCut_));
                 }
                 ui::drawFacts(facts);
+                ui::drawShoulderKeys({"Favourites"});
                 preview.show("");
                 return;
             }
             const fs::Entry &entry = entries[index];
             const std::string path = current + entry.name;
+            ui::drawShoulderKeys(
+                {"Favourites"},
+                starKey(starred.count(favorites::key(favoritePath(current, entry))) > 0));
             auto found = details.find(path);
             if (found == details.end()) {
                 const Kind kind = kindOf(entry);
@@ -1309,16 +1330,7 @@ void App::browseFiles(const std::string &select)
             continue;
         }
         if (result.key == KEY_L) {
-            const std::string chosen = favoritesScreen();
-            if (!chosen.empty()) {
-                // A folder opens; a file is highlighted in its folder.
-                const bool folder = chosen.back() == '/';
-                current = folder ? chosen : folderOf(chosen);
-                landOn = folder ? "" : fileops::name(chosen);
-                cursor = 0;
-                marked.clear();
-                reload = true;
-            }
+            reload = favoritesScreen();
             continue;
         }
         // A new order is sorted in memory, keeping the highlighted entry;
@@ -1348,6 +1360,7 @@ void App::browseFiles(const std::string &select)
         };
         // What an action changed, for the index to forget: this folder,
         // what it acted on, and where anything moved here came from.
+        const std::string folderBefore = current; // options can leave it
         const std::vector<std::string> clipboardBefore = clipboard_;
         const bool cutBefore = clipboardCut_;
         const auto noteChanges = [&](bool changed,
@@ -1363,7 +1376,7 @@ void App::browseFiles(const std::string &select)
                     sdChanged(path);
                 }
             }
-            sdChanged(current);
+            sdChanged(folderBefore);
         };
         if (result.key == KEY_X) {
             afterOptions(sortScreen(current));
@@ -1421,7 +1434,7 @@ void App::toggleFavorite(const std::string &path)
     ui::notify(notice);
 }
 
-std::string App::favoritesScreen()
+bool App::favoritesScreen()
 {
     int cursor = 0;
     float scroll = -1;
@@ -1489,6 +1502,7 @@ std::string App::favoritesScreen()
                 preview.show("");
                 return;
             }
+            ui::drawShoulderKeys({}, starKey(true)); // R takes it off the list
             const Row &row = rows[index];
             const Kind kind = kindOf(row.entry);
             if (!row.present) {
@@ -1513,11 +1527,15 @@ std::string App::favoritesScreen()
             continue;
         }
         if (result.key != KEY_A || !onRow) {
-            return "";
+            return false;
         }
         const Row &row = rows[result.index];
         if (row.present) {
-            return row.favorite;
+            // A folder opens; a file is highlighted in its folder.
+            const bool folder = row.entry.folder;
+            filesFolder_ = folder ? row.favorite : folderOf(row.favorite);
+            filesLandOn_ = folder ? "" : row.entry.name;
+            return true;
         }
         ui::Dialog dialog;
         dialog.header = "Favourites";
@@ -1529,7 +1547,7 @@ std::string App::favoritesScreen()
             toggleFavorite(row.favorite);
         }
     }
-    return "";
+    return false;
 }
 
 void App::openFile(const std::string &path,
@@ -1959,6 +1977,7 @@ bool App::folderOptions(const std::string &folder,
         ClearMarks,
         InstallAll,
         Favorite,
+        Favorites,
         Properties
     };
     std::vector<ui::MenuItem> items;
@@ -2001,6 +2020,7 @@ bool App::folderOptions(const std::string &folder,
                                                              : "Favourite",
             Action::Favorite);
     }
+    add("Favourites...", Action::Favorites);
     add("Properties", Action::Properties);
 
     const std::string name = folderTitle(folder);
@@ -2075,6 +2095,12 @@ bool App::folderOptions(const std::string &folder,
     }
     case Action::Favorite:
         toggleFavorite(folder);
+        return false;
+    case Action::Favorites:
+        if (favoritesScreen()) {
+            marked.clear();
+            return true;
+        }
         return false;
     case Action::Properties: {
         std::string path = folder;

@@ -50,6 +50,8 @@ ICONS = [
     ("Lock", '<rect x="5" y="11" width="14" height="9" rx="1.5"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
     # Filled, so a favourite's star still reads as one beside a row's size.
     ("Star", '<path fill="#fff" d="M12 3.6L14.29 9.44L20.56 9.82L15.71 13.81L17.29 19.88L12 16.5L6.71 19.88L8.29 13.81L3.44 9.82L9.71 9.44Z"/>'),
+    # The same star, not filled: what R would add.
+    ("StarOutline", '<path d="M12 3.6L14.29 9.44L20.56 9.82L15.71 13.81L17.29 19.88L12 16.5L6.71 19.88L8.29 13.81L3.44 9.82L9.71 9.44Z"/>'),
 ]
 
 SIZES = [64, 32, 24, 18]

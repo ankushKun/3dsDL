@@ -177,9 +177,11 @@ with a few hundred files.
 44. Mark several CIAs and install them: each installs, and the summary counts
     them.
 44a. R stars a folder and a `.3dsx`, with the notice on the top screen, and
-    again takes the star away. L opens Favourites from any folder: A opens
-    the folder, and lands on the `.3dsx` in its folder. Stars survive a
-    restart, follow a rename and a cut and paste, and go with a delete.
+    again takes the star away; the top screen's bottom corners name L and
+    R, legible and clear of the panel. L opens Favourites from any folder:
+    A opens the folder, and lands on the `.3dsx` in its folder. Stars
+    survive a restart, follow a rename and a cut and paste, and go with a
+    delete.
 
 ### Software updates and Titles
 

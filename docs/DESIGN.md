@@ -115,6 +115,14 @@ first guess is cap 15 at scale 0.72.
   soft ink.
 - Info panel at x 17 to 383, y 69 to 225. Content screens (text editor, hex
   view, pictures) use the whole area below the title row instead.
+- Shoulder keys, y 225 to 240: when L or R has a job, a small grey tab
+  in the corner nearest its button names it, built as the nav tabs are:
+  flush with the screen's edges, its inner top corner rounded, the key's
+  white cap on the outside. A key that goes somewhere takes a word (Files:
+  L Favourites); one that toggles shows the state it changes instead, so
+  the two never read alike (Files: R as a star, outlined when R would add
+  the entry, gold when it would take it away). They name buttons and take
+  no touch, so the bottom screen keeps a way to do the same.
 
 ### Bottom screen
 
@@ -135,10 +143,9 @@ badge. The scrollbar's column takes a drag: the thumb follows the stylus, and
 a touch on the track brings the thumb's middle there. A list that fills in
 while open keeps the row at the top of the view in place as rows arrive above
 it; only a list nobody has touched stays at its first row. A list can put
-actions at the right end of its heading for what changes or leaves the
-whole list, each a key cap and a word in the heading's ink (Files' L
-Favourites and X Sort, matching the Software lists' X Sort tab), never a
-pill. A row on its way carries a thin progress bar along its foot.
+actions at the right end of its heading for what changes the whole list,
+each a key cap and a word in the heading's ink (Files' X Sort, matching the
+Software lists' X Sort tab), never a pill. A row on its way carries a thin progress bar along its foot.
 
 ### Dialogs
 
@@ -159,8 +166,8 @@ strip for a red button and a 30 px dark Cancel strip.
 | Install prompt | icon, name, publisher, Title ID, Version, Size | Install, Install and Delete File, Keep File |
 | Installing | icon, name, progress | do not turn off |
 | Installed | icon, name, time taken | dialog: Close / Launch |
-| Files | details of the highlighted entry; a picture's preview, a song's cover | path, L Favourites and X Sort, six rows, Back, page counter, Options; R stars the highlighted entry |
-| Favourites | details of the highlighted favourite, as Files shows it | starred folders and files in the order they were starred, each with its folder, or Missing; Back, R Remove; A opens a folder, or a file's folder with it highlighted |
+| Files | details of the highlighted entry; a picture's preview, a song's cover; L Favourites and R's star in the corner tabs | path, X Sort, six rows, Back, page counter, Options |
+| Favourites | details of the highlighted favourite, as Files shows it; R's gold star in the corner tab | starred folders and files in the order they were starred, each with its folder, or Missing; Back, R Remove; A opens a folder, or a file's folder with it highlighted |
 | File options | the file the choices act on | eight small buttons in two columns |
 | Picture viewer | the picture, nothing else | name, size, position, Previous / Next |
 | Song viewer | title, cover, artist, album, length, track | name, format, position, Previous / Next |

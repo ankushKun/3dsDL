@@ -229,6 +229,17 @@ void drawTopChrome(const std::string &title, Icon icon = Icon::None,
 // default).
 constexpr Rect TopPanel = {17, 69, 366, 156};
 void drawPanel(const Rect &rect = TopPanel);
+// What L or R does, for drawShoulderKeys: a word, an icon, or both.
+struct ShoulderKey {
+    std::string label;
+    Icon icon = Icon::None;
+    u32 iconColor = color::rgb(0xFFFFFF);
+};
+// L's and R's jobs as small grey tabs in the top screen's bottom corners,
+// nearest their buttons and under TopPanel. They name buttons and take no
+// touch, so the bottom screen keeps a way to do the same. A key with
+// neither label nor icon is left out.
+void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right = {});
 void drawRecess(const Rect &rect);
 // Centred, wrapped text in a panel; returns the y below it.
 float drawPanelText(const std::string &value, const Rect &rect,

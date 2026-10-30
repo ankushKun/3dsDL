@@ -2153,6 +2153,76 @@ void drawTab(Tab tab, const std::string &label, const std::string &key,
                  labelScale, squeeze, color::rgb(0xFFFFFF), 0);
 }
 
+void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
+{
+    // Built as the nav tabs are, small enough for the strip under the panel.
+    const float top = TopPanel.y + TopPanel.h;
+    const float height = ScreenHeight - top;
+    const float radius = height / 2;
+    constexpr float Cap = 11;
+    constexpr float LetterScale = 0.3f;
+    constexpr float IconSize = 11;
+    constexpr float Gap = 4;
+    constexpr float Outer = 5; // from the screen's edge to the cap
+    constexpr float Inner = 9; // clear of the rounded corner
+    const float middle = top + 1 + (height - 1) / 2;
+    const auto drawCap = [&](const char *letter, float x) {
+        fillRound({x, middle - Cap / 2, Cap, Cap}, Cap / 2, color::rgb(0xFFFFFF));
+        drawText(letter,
+                 std::round(x + (Cap - textWidth(letter, LetterScale)) / 2 +
+                            inkOffset(letter, LetterScale)),
+                 std::round(middle - lineHeight(LetterScale) / 2 + 1),
+                 LetterScale, color::rgb(0x6C6C6C));
+        return x + Cap + Gap;
+    };
+    const auto drawIconPart = [&](const ShoulderKey &key, float x) {
+        if (key.icon == Icon::None) {
+            return x;
+        }
+        drawIcon(key.icon, x, middle - IconSize / 2, IconSize, key.iconColor);
+        return x + IconSize + Gap;
+    };
+    const auto drawLabel = [&](const ShoulderKey &key, float x) {
+        if (key.label.empty()) {
+            return x;
+        }
+        drawText(key.label, x, std::round(middle - lineHeight(type::Tiny) / 2 + 1),
+                 type::Tiny, color::rgb(0xFFFFFF));
+        return x + textWidth(key.label, type::Tiny) + Gap;
+    };
+    const auto draw = [&](const ShoulderKey &key, const char *letter, bool onLeft) {
+        if (key.label.empty() && key.icon == Icon::None) {
+            return;
+        }
+        float content = Cap;
+        if (key.icon != Icon::None) {
+            content += Gap + IconSize;
+        }
+        if (!key.label.empty()) {
+            content += Gap + textWidth(key.label, type::Tiny);
+        }
+        const float width = std::round(Outer + content + Inner);
+        const Rect area = {onLeft ? 0 : TopWidth - width, top, width, height};
+        const unsigned corners = onLeft ? corner::TopRight : corner::TopLeft;
+        fillRound({area.x - (onLeft ? 0 : 1), area.y - 1, area.w + 1, area.h + 1},
+                  radius + 1, color::rgb(0x000000, 0x30), corners);
+        fillRound(area, radius, color::rgb(0xC4C4C4), corners);
+        const Stop body[] = {{0, color::rgb(0x8A8A8A)},
+                             {0.12f, color::rgb(0x7C7C7C)},
+                             {0.6f, color::rgb(0x707070)},
+                             {1, color::rgb(0x666666)}};
+        fillShape({area.x, area.y + 1, area.w, area.h - 1}, radius, corners, body, 4);
+        // The cap is outermost, nearest the button.
+        if (onLeft) {
+            drawLabel(key, drawIconPart(key, drawCap(letter, area.x + Outer)));
+        } else {
+            drawCap(letter, drawIconPart(key, drawLabel(key, area.x + Inner)));
+        }
+    };
+    draw(left, "L", true);
+    draw(right, "R", false);
+}
+
 float drawTag(float x, float y, const std::string &label, u32 fill)
 {
     const float width = textWidth(label, 0.4f) + 16;

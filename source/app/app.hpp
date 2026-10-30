@@ -93,8 +93,9 @@ private:
     void browseFiles(const std::string &select = "");
     // Stars path (see favorites.hpp) or takes its star away, and says so.
     void toggleFavorite(const std::string &path);
-    // The starred folders and files. Returns the favourite chosen, or "".
-    std::string favoritesScreen();
+    // The starred folders and files. True when one was chosen: Files is
+    // to open it (filesFolder_, with filesLandOn_ for a file).
+    bool favoritesScreen();
     // folder, when given, is the whole folder path is in, already read and
     // sorted, for the picture viewer's previous and next.
     void openFile(const std::string &path,
@@ -238,6 +239,8 @@ private:
     std::vector<HistoryEntry> history_;
     int homeSelection_ = 2; // Scan QR Code
     std::string filesFolder_;
+    // An entry for Files to highlight in filesFolder_ once it is read.
+    std::string filesLandOn_;
     // Copied or cut entries waiting to be pasted.
     std::vector<std::string> clipboard_;
     bool clipboardCut_ = false;
