@@ -74,7 +74,8 @@ Result copy(const std::string &source, const std::string &destination,
 Result remove(const std::string &path, Observer &observer, uint64_t &done,
               uint64_t total);
 
-// Renames or moves within the SD card. Fails when destination exists.
+// Renames or moves within the SD card. Fails when destination exists,
+// unless it is source itself named in another case.
 bool move(const std::string &source, const std::string &destination,
           std::string &error);
 

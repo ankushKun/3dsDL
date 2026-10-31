@@ -405,7 +405,8 @@ void transferEntry(int client, const FileSharing &sharing, const std::string &lo
     }
     StopWith observer(sharing);
     bool merge = false;
-    if (fileops::exists(destination)) {
+    // A rename that only changes case is no clash; fileops::move does it.
+    if (!(moving && itself) && fileops::exists(destination)) {
         if (clash == "keep") {
             destination = naming::unusedPath(folder.back() == '/' ? folder : folder + "/",
                                              fileops::name(destination),

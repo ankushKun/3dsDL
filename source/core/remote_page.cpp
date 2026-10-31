@@ -460,7 +460,7 @@ const char *const PageEnd = R"PAGE(<form method="post" action="/send" class="wel
 <div class="toasts" id="toasts"></div>
 <div class="dragcard" id="dragcard"></div>
 <dialog id="dlg"><div class="dbody"><h2 id="dt"></h2><div class="warnbox" id="dw" hidden><span class="dwi"></span><span></span></div><p id="dp"></p><div id="dx"></div>
-<input type="text" id="di" autocomplete="off" spellcheck="false"><p class="err" id="de" hidden></p></div><div class="row2" id="db"></div></dialog>
+<input type="text" id="di" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"><p class="err" id="de" hidden></p></div><div class="row2" id="db"></div></dialog>
 <dialog id="picker" class="picker"><div class="dbody"><h2 id="ptitle"></h2><div class="cols" id="pcols"></div><nav class="crumbs" id="pcrumbs"></nav></div>
 <div class="row2"><button type="button" class="btn left" id="pmkdir"></button><button type="button" class="btn" id="pcancel">Cancel</button><button type="button" class="btn" id="pcopy">Copy</button><button type="button" class="btn" id="pmove">Move</button></div></dialog>
 <dialog id="sheet" class="sheet"></dialog>

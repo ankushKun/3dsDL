@@ -433,6 +433,13 @@ TEST("remote server: files go up, come back, move and go away")
     CHECK(fs::fileExists(root.path + "/game.cia"));
     CHECK(startsWith(post(port, "/api/move", "from=%2Fcia&to=%2Fcia%2Finside"),
                      "HTTP/1.1 409"));
+    // A rename that only changes case is no clash.
+    CHECK(bodyOf(post(port, "/api/move", "from=%2Fgame.cia&to=%2FGame.CIA")) ==
+          "{\"path\":\"/Game.CIA\"}");
+    CHECK(bodyOf(get(port, "/api/list?path=%2F")).find("\"name\":\"Game.CIA\"") !=
+          std::string::npos);
+    CHECK(startsWith(post(port, "/api/move", "from=%2FGame.CIA&to=%2Fgame.cia"),
+                     "HTTP/1.1 200"));
 
     // The page asks the console to install; only real CIAs go through.
     response = post(port, "/api/install", "paths=%2Fgame.cia%0A%2Fmissing.cia%0A%2Fcia");
@@ -445,10 +452,12 @@ TEST("remote server: files go up, come back, move and go away")
     CHECK(startsWith(post(port, "/api/delete", "path=%2F"), "HTTP/1.1 400"));
     {
         std::lock_guard<std::mutex> hold(lock);
-        // The replaced file, both ends of the move, then the deleted folder.
+        // The replaced file, both ends of each move, then the deleted folder.
         const std::vector<std::string> expected = {
             root.path + "/cia/a b.bin", root.path + "/cia/a b.bin",
-            root.path + "/game.cia", root.path + "/cia"};
+            root.path + "/game.cia",    root.path + "/game.cia",
+            root.path + "/Game.CIA",    root.path + "/Game.CIA",
+            root.path + "/game.cia",    root.path + "/cia"};
         CHECK(changed == expected);
     }
 

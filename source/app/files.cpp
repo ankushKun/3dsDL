@@ -2255,19 +2255,10 @@ bool App::renameEntry(const std::string &path)
         ui::message("Cannot use that name", error, ui::Tone::Error, newName);
         return false;
     }
-    const std::string folder = folderOf(path);
-    const std::string target = folder + newName;
-    // FAT ignores case, so "a.txt" to "A.txt" goes through a spare name.
-    if (text::lower(newName) == text::lower(oldName)) {
-        const std::string spare = folder + ".3dsdl-rename-" + oldName;
-        if (!fileops::move(path, spare, error) ||
-            !fileops::move(spare, target, error)) {
-            ui::message("Could not rename", error, ui::Tone::Error);
-            return true;
-        }
-    } else if (!fileops::move(path, target, error)) {
+    const std::string target = folderOf(path) + newName;
+    if (!fileops::move(path, target, error)) {
         ui::message("Could not rename", error, ui::Tone::Error);
-        return false;
+        return !fileops::exists(path);
     }
     if (favorites::moved(settings_.favorites, path, target)) {
         persistSettings();

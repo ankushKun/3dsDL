@@ -291,6 +291,38 @@ Result remove(const std::string &path, Observer &observer, uint64_t &done,
 bool move(const std::string &source, const std::string &destination,
           std::string &error)
 {
+    // FAT ignores case, so a name that changes only in case is the entry
+    // itself: it goes through a spare name, and back if the second step
+    // fails.
+    std::string from = source;
+    std::string to = destination;
+    while (from.size() > 1 && from.back() == '/') {
+        from.pop_back();
+    }
+    while (to.size() > 1 && to.back() == '/') {
+        to.pop_back();
+    }
+    if (text::lower(from) == text::lower(to)) {
+        const std::string folder = from.substr(0, from.find_last_of('/') + 1);
+        const std::string target = folder + name(to);
+        if (target == from) {
+            return true;
+        }
+        std::string spare = folder + ".3dsdl-rename";
+        for (int count = 1; exists(spare); ++count) {
+            spare = folder + ".3dsdl-rename-" + std::to_string(count);
+        }
+        if (std::rename(from.c_str(), spare.c_str()) != 0) {
+            error = failure("Could not rename", source);
+            return false;
+        }
+        if (std::rename(spare.c_str(), target.c_str()) != 0) {
+            error = failure("Could not rename", source);
+            std::rename(spare.c_str(), from.c_str());
+            return false;
+        }
+        return true;
+    }
     if (exists(destination)) {
         error = name(destination) + " already exists.";
         return false;

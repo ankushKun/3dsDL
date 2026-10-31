@@ -142,6 +142,21 @@ TEST("fileops: copy, move and delete files and folders")
     CHECK(!fileops::move(root + "src/a.txt", root + "moved.txt", error));
     CHECK(!fileops::move(root + "src", root + "src/inner/x", error));
 
+    // A name that changes only in case is the entry itself, not a clash.
+    CHECK(fileops::move(root + "moved.txt", root + "Moved.TXT", error));
+    CHECK(fileops::move(root + "src/", root + "SRC", error));
+    CHECK(fileops::move(root + "SRC", root + "SRC", error));
+    std::string names;
+    for (const fs::Entry &entry : fs::listEntries(root, nullptr, true, false)) {
+        names += entry.name + ";";
+    }
+    CHECK(names.find("Moved.TXT;") != std::string::npos);
+    CHECK(names.find("SRC;") != std::string::npos);
+    CHECK(names.find("moved.txt;") == std::string::npos);
+    CHECK(names.find("src;") == std::string::npos);
+    CHECK(names.find(".3dsdl-rename") == std::string::npos);
+    CHECK_EQ(readText(root + "SRC/a.txt"), std::string("hello"));
+
     uint64_t deleted = 0;
     result = fileops::remove(root + "copy", observer, deleted, 1);
     CHECK(result.status == fileops::Status::Ok);
