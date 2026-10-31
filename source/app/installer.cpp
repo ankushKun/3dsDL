@@ -300,7 +300,7 @@ FS_MediaType destination(uint64_t titleId)
 }
 
 Result installCia(const std::string &path, uint64_t titleId,
-                  Observer &observer)
+                  Observer &observer, bool commit)
 {
     if (!started) {
         Result result;
@@ -392,7 +392,8 @@ Result installCia(const std::string &path, uint64_t titleId,
         observer.onProgress(offset, size);
     }
 
-    code = AM_FinishCiaInstall(target);
+    code = commit ? AM_FinishCiaInstall(target)
+                  : AM_FinishCiaInstallWithoutCommit(target);
     if (R_FAILED(code)) {
         return failure(code, "The install could not be finished.");
     }
@@ -577,6 +578,22 @@ bool installedVersion(uint64_t titleId, uint16_t &version)
     }
     version = info.version;
     return true;
+}
+
+bool commitImport(uint64_t titleId, std::string &error)
+{
+    u64 id = titleId;
+    const ::Result code = AM_CommitImportTitles(destination(titleId), 1, false, &id);
+    if (R_FAILED(code)) {
+        error = "The install could not be finished. " + describe(code);
+        return false;
+    }
+    return true;
+}
+
+void forgetImport(uint64_t titleId)
+{
+    AM_DeletePendingTitle(destination(titleId), titleId);
 }
 
 bool removeTitle(uint64_t titleId, std::string &error)

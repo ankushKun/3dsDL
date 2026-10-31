@@ -215,6 +215,7 @@ void runExtract(void *argument)
 struct InstallJob : installer::Observer {
     std::string path;
     uint64_t titleId = 0;
+    bool commit = true;
     installer::Result result;
     std::atomic<bool> cancel {false};
     std::atomic<bool> closing {false};
@@ -240,7 +241,7 @@ struct InstallJob : installer::Observer {
 void runInstall(void *argument)
 {
     InstallJob &job = *static_cast<InstallJob *>(argument);
-    job.result = installer::installCia(job.path, job.titleId, job);
+    job.result = installer::installCia(job.path, job.titleId, job, job.commit);
     job.finished = true;
 }
 
@@ -630,11 +631,12 @@ archives::Result extract(const std::string &path,
 
 installer::Result install(const std::string &path, uint64_t titleId,
                           const std::string &name,
-                          const std::vector<uint16_t> &icon)
+                          const std::vector<uint16_t> &icon, bool commit)
 {
     InstallJob job;
     job.path = path;
     job.titleId = titleId;
+    job.commit = commit;
 
     awake::Hold hold;
     Thread thread = startWorkerThread(runInstall, &job, "install");

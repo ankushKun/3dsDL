@@ -48,8 +48,15 @@ struct Result {
 };
 
 // path is an sdmc:/ path to a CIA, or a .zcia, whose title ID is titleId.
+// Without commit, AM keeps what it took in as an unfinished install until
+// commitImport or forgetImport, so the installed version only has to go
+// once the new one is in whole.
 Result installCia(const std::string &path, uint64_t titleId,
-                  Observer &observer);
+                  Observer &observer, bool commit = true);
+// Makes an install left uncommitted the installed title.
+bool commitImport(uint64_t titleId, std::string &error);
+// Drops an install left uncommitted.
+void forgetImport(uint64_t titleId);
 
 // Installs a CIA as it downloads, without saving the file, for SD cards
 // too full to hold it. Data must come in order from offset 0. The install

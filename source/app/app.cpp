@@ -1065,6 +1065,111 @@ void App::offerInstall(const std::string &path, const std::string &address,
     installCia(path, info, action == CiaAction::InstallAndDelete, address);
 }
 
+bool App::replaceRunning(const std::string &path, const cia::Info &info,
+                         uint16_t installed, bool deleteAfter, std::string *why,
+                         bool *kept)
+{
+    const auto stopped = [why](const std::string &reason) {
+        if (why != nullptr) {
+            *why = reason;
+        }
+        return false;
+    };
+    const std::string name = ciaName(info);
+    const std::string installedText = screens::titleVersion(info.titleId, installed);
+    const std::string fileText = screens::titleVersion(info.titleId, info.version);
+    const bool same = installed == info.version;
+
+    ui::Dialog dialog;
+    dialog.header = "install";
+    dialog.title = same ? "Install " + name + " " + fileText + " again?"
+                        : "Replace the running " + name + " " + installedText +
+                              " with the older " + fileText + "?";
+    dialog.tone = ui::Tone::Warning;
+    dialog.icon = ui::showIcon(info.smdh.icon);
+    dialog.body.push_back({name + " starts again once it is in.", ui::color::Text,
+                           0.48f, 2});
+    dialog.buttons = {same ? "Reinstall" : "Replace", "Cancel"};
+    dialog.initial = 1;
+    dialog.cancelButton = 1;
+    if (ui::choose(dialog) != 0) {
+        if (same && kept != nullptr) {
+            *kept = true;
+            if (why != nullptr) {
+                *why = name + " " + installedText + " is already installed, and it was kept.";
+            }
+            return false;
+        }
+        return stopped("Cancel was chosen on the 3DS.");
+    }
+    const int64_t needed = installer::requiredSpace(path, info);
+    const int64_t free = platform::sdFreeBytes();
+    if (needed > 0 && free >= 0 && needed > free) {
+        ui::message("Not enough space",
+                    name + " needs " + units::bytes(static_cast<uint64_t>(needed)) +
+                        " on the SD card and " +
+                        units::bytes(static_cast<uint64_t>(free)) + " is free.",
+                    ui::Tone::Error);
+        return stopped("It needs " + units::bytes(static_cast<uint64_t>(needed)) +
+                       " on the SD card and " +
+                       units::bytes(static_cast<uint64_t>(free)) + " is free.");
+    }
+
+    // AM refuses an older version, or the same one, over the installed one,
+    // and the running one is not removed until this one is in whole: taken
+    // in without being committed, it is checked as it goes.
+    const installer::Result result =
+        tasks::install(path, info.titleId, name, info.smdh.icon, false);
+    sdChanged("sdmc:/Nintendo 3DS/");
+    if (result.outcome != installer::Outcome::Installed) {
+        installer::forgetImport(info.titleId);
+        const std::string reason =
+            result.versionRefused
+                ? "The console will not take this version while " + installedText +
+                      " is installed. Start " + name +
+                      " from the Homebrew Launcher and install it from there."
+                : result.message;
+        ui::message("Install failed", reason, ui::Tone::Error, name);
+        return stopped(reason);
+    }
+    std::string error;
+    if (!installer::removeTitle(info.titleId, error)) {
+        installer::forgetImport(info.titleId);
+        logging::warn("install.replace", {{"title", cia::titleIdText(info.titleId)},
+                                          {"step", "remove"}, {"message", error}});
+        const std::string reason = "The running " + name + " could not be removed. " +
+                                   error + " Nothing was changed.";
+        ui::message("Not Installed", reason, ui::Tone::Error);
+        return stopped(reason);
+    }
+    if (!installer::commitImport(info.titleId, error)) {
+        logging::error("install.replace", {{"title", cia::titleIdText(info.titleId)},
+                                           {"step", "commit"}, {"message", error}});
+        const std::string reason = name + " was removed, and " + fileText +
+                                   " did not go in. " + error +
+                                   " Install a " + name + " CIA again with FBI or "
+                                   "from the Homebrew Launcher.";
+        ui::message("Not Installed", reason, ui::Tone::Error);
+        return stopped(reason);
+    }
+    logging::info("install.replace", {{"title", cia::titleIdText(info.titleId)},
+                                      {"from", installedText}, {"to", fileText}});
+    if (deleteAfter && fs::removeFile(path)) {
+        sdChanged(path);
+    }
+    ui::Dialog done;
+    done.header = "install";
+    done.title = name + " " + fileText + " is installed.";
+    done.tone = ui::Tone::Success;
+    done.icon = ui::showIcon(info.smdh.icon);
+    done.buttons = {"Restart"};
+    ui::choose(done);
+    // Closing with the chainloader set starts the version just put in.
+    aptSetChainloaderToSelf();
+    quit_ = true;
+    return true;
+}
+
 bool App::installCia(const std::string &path, const cia::Info &info,
                      bool deleteAfter, const std::string &address, bool quiet,
                      bool *alreadyInstalled, std::string *why)
@@ -1179,11 +1284,13 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         // AM answers 0xC8E083FC to the same version, after the whole file.
         bool reinstall = false;
         if (isRunning) {
-            ui::message("Already Installed",
-                        name + " " + screens::titleVersion(info.titleId, installed) +
-                            " is running now, so it cannot be installed "
-                            "again.",
-                        ui::Tone::Info);
+            bool kept = false;
+            const bool replaced =
+                replaceRunning(path, info, installed, deleteAfter, why, &kept);
+            if (alreadyInstalled != nullptr) {
+                *alreadyInstalled = kept;
+            }
+            return replaced || kept;
         } else {
             reinstall = confirmReplace("This version of " + name +
                                            " is already installed",
@@ -1206,15 +1313,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         removeFirst = true;
     } else if (isInstalled && installed > info.version) {
         if (isRunning) {
-            ui::message("Newer Version Running",
-                        name + " " + screens::titleVersion(info.titleId, installed) +
-                            " is installed and running now, so it cannot "
-                            "be replaced by this older " +
-                            screens::titleVersion(info.titleId, info.version) + ".",
-                        ui::Tone::Info);
-            return stopped(name + " " + installedText +
-                           " is installed and running, so this older " +
-                           fileText + " cannot replace it.");
+            return replaceRunning(path, info, installed, deleteAfter, why);
         }
         if (!confirmReplace("A newer version of " + name +
                             " is installed")) {

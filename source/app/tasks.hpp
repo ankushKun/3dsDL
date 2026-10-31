@@ -36,10 +36,12 @@ archives::Result extract(const std::string &path,
 
 // Installs the CIA at path. name is shown while it runs. It cannot be
 // stopped, and HOME waits until it ends: cancelling an install on a console
-// left its SD card unreadable until a restart (issue #15).
+// left its SD card unreadable until a restart (issue #15). Without commit
+// it is left as an unfinished install (installer::installCia).
 installer::Result install(const std::string &path, uint64_t titleId,
                           const std::string &name,
-                          const std::vector<uint16_t> &icon = {});
+                          const std::vector<uint16_t> &icon = {},
+                          bool commit = true);
 
 // Runs a copy, move or delete on the worker thread with a progress screen.
 // total is what the observer's done counts towards: bytes, or files when

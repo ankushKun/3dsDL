@@ -139,6 +139,12 @@ installed, and a game older than the installed version.
     first and warns about save data. A CIA that shares an installed
     title's ID under another name, like a ROM hack, asks to replace the
     installed one by name, showing both names.
+32a. With the 3dsDL CIA running, installing an older 3dsDL CIA asks to
+    replace the running one, starting on Cancel; Replace installs it,
+    restarts into it, and log.txt has install.replace from and to. The same
+    version asks Reinstall. If the console refuses, 3dsDL stays as it was
+    and says why. An older version of another app asks first, keeps its save
+    as a "Before Reinstall" backup, and installs.
 33. An update and a DLC install over their game, and LAUNCH opens the game.
 34. An install has no Cancel, B does nothing and HOME is held back until it
     ends. Stopping one used to leave the SD card unreadable until a restart

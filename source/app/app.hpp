@@ -104,6 +104,14 @@ private:
                     bool deleteAfter, const std::string &address,
                     bool quiet = false, bool *alreadyInstalled = nullptr,
                     std::string *why = nullptr);
+    // Puts an older version of the running app (3dsDL itself), or the same
+    // one again, in its place: the CIA goes in whole but uncommitted, then
+    // the running one is removed and the new one committed, so only that
+    // last step can leave it uninstalled. It starts again afterwards. kept,
+    // when given, is set when the same version was asked about and kept.
+    bool replaceRunning(const std::string &path, const cia::Info &info,
+                        uint16_t installed, bool deleteAfter, std::string *why,
+                        bool *kept = nullptr);
     void markInstalled(const std::string &address, const std::string &path,
                        const std::string &message);
 
