@@ -149,6 +149,53 @@ TEST("fileops: copy, move and delete files and folders")
     CHECK(!fileops::exists(root + "copy"));
 }
 
+TEST("fileops: a folder merges into one of the same name")
+{
+    TempDir temp;
+    const std::string root = temp.path();
+    CHECK(fs::makeDirectories(root + "new/data/deep/"));
+    CHECK(writeText(root + "new/app.3dsx", "new app"));
+    CHECK(writeText(root + "new/data/deep/level.bin", "new level"));
+    CHECK(writeText(root + "new/swap", "a file now"));
+    CHECK(fs::makeDirectories(root + "old/DATA/"));
+    CHECK(fs::makeDirectories(root + "old/swap/"));
+    CHECK(writeText(root + "old/APP.3dsx", "old app"));
+    CHECK(writeText(root + "old/config.ini", "kept"));
+    CHECK(writeText(root + "old/DATA/save.bin", "kept too"));
+    CHECK(writeText(root + "old/swap/inside", "a folder before"));
+
+    // Copied: same names are replaced whatever their case, folders meet,
+    // and what only the destination had stays.
+    Quiet observer;
+    uint64_t done = 0;
+    fileops::Result result = fileops::merge(root + "new", root + "old", false,
+                                            observer, done, 0);
+    CHECK(result.status == fileops::Status::Ok);
+    CHECK_EQ(result.files, static_cast<uint64_t>(3));
+    CHECK_EQ(readText(root + "old/app.3dsx"), std::string("new app"));
+    CHECK_EQ(readText(root + "old/data/deep/level.bin"), std::string("new level"));
+    CHECK_EQ(readText(root + "old/DATA/save.bin"), std::string("kept too"));
+    CHECK_EQ(readText(root + "old/config.ini"), std::string("kept"));
+    CHECK(!fileops::isFolder(root + "old/swap"));
+    CHECK_EQ(readText(root + "old/swap"), std::string("a file now"));
+    CHECK(fileops::exists(root + "new/app.3dsx"));
+
+    // Moved: the same, and the source is gone after.
+    CHECK(writeText(root + "new/app.3dsx", "newer app"));
+    result = fileops::merge(root + "new", root + "old", true, observer, done, 0);
+    CHECK(result.status == fileops::Status::Ok);
+    CHECK(!fileops::exists(root + "new"));
+    CHECK_EQ(readText(root + "old/app.3dsx"), std::string("newer app"));
+    CHECK_EQ(readText(root + "old/data/deep/level.bin"), std::string("new level"));
+    CHECK_EQ(readText(root + "old/config.ini"), std::string("kept"));
+
+    // Never into itself.
+    CHECK(fs::makeDirectories(root + "old/sub/"));
+    result = fileops::merge(root + "old", root + "old/sub", true, observer, done, 0);
+    CHECK(result.status == fileops::Status::Failed);
+    CHECK(fileops::exists(root + "old/config.ini"));
+}
+
 TEST("fileops: a cancelled copy removes the unfinished file")
 {
     TempDir temp;

@@ -177,6 +177,12 @@ with a few hundred files.
     original. Paste into the same folder makes "name (1)".
 41. Cut and paste moves instantly, also between folders, and never into
     itself. Something that could not move stays ready to paste.
+41a. Tapping a row's icon marks it (its icon turns to a check), and again
+    unmarks it. With something cut or copied, Y on any entry starts with
+    Move Here or Paste Here. Pasting three items where two names are
+    taken asks once; Ask for Each asks per item. Merging a folder into one
+    of the same name replaces the files with the same names, keeps the
+    rest, and after a cut leaves no source folder behind.
 42. Delete a folder with files inside: it says how much is inside first, then
     removes everything.
 43. Rename, including changing only the case of a name (a.txt to A.txt).

@@ -451,6 +451,8 @@ struct ListSpec {
     u32 extraKeys = 0;     // keys besides A and B that close the list
     // A long press on a row reports this key with that row highlighted.
     u32 longPressKey = 0;
+    // A tap on a row's icon reports this key with that row highlighted.
+    u32 iconTapKey = 0;
     // Draws the top screen for the highlighted item (index -1 when empty).
     std::function<void(int)> drawTop;
     // For lists that fill in while open: called every frame before drawing,

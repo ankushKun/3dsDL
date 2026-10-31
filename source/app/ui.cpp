@@ -3433,6 +3433,12 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor, float *offset)
             scrollable ? Rect{inner.x, inner.y, barColumn.x - inner.x, inner.h} : inner;
         if (scroller.update(input, rows, content, viewport)) {
             const int row = rowAt(scroller.tapPoint);
+            if (row >= 0 && spec.iconTapKey != 0 &&
+                spec.items[row].icon != Icon::None &&
+                scroller.tapPoint.px < rowLeft + 31) {
+                cursor = row;
+                return {spec.iconTapKey, cursor};
+            }
             if (row >= 0 && row != cursor) {
                 // The first tap only highlights; the next one opens.
                 cursor = row;

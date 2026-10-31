@@ -47,7 +47,7 @@ curl -T game.cia -H 'X-Requested-With: 3dsDL' 'http://192.168.1.20/api/file?path
 
 Files browses the SD card. Tap a row to select it and tap again (or press <kbd>A</kbd>) to open it. Pictures fill the top screen, text and config files open in a line editor, ZIPs show their contents, CIAs (Azahar's compressed `.zcia` too) and tickets install, and anything else opens as hex.
 
-<kbd>Y</kbd> opens the options for an entry (rename, copy, cut, delete, install, properties, SHA-256), <kbd>SELECT</kbd> marks several entries, and <kbd>START</kbd> has the folder options (paste, new folder or file, hidden files). <kbd>X</kbd> (or Sort at the right of the folder's path) sorts by name, date, size or type, in either direction. Folders always come before files, and sorting by size adds up each folder in the background. Properties adds up a folder or the marked items.
+<kbd>Y</kbd> opens the options for an entry (rename, copy, cut, delete, install, properties, SHA-256), <kbd>SELECT</kbd> or a tap on an entry's icon marks several entries, and <kbd>START</kbd> has the folder options (paste, new folder or file, hidden files). Once something is cut or copied, <kbd>Y</kbd> in any folder starts with Move Here or Paste Here. When names are already taken you answer once for all of them, or for each; a folder meeting a folder of the same name merges into it. <kbd>X</kbd> (or Sort at the right of the folder's path) sorts by name, date, size or type, in either direction. Folders always come before files, and sorting by size adds up each folder in the background. Properties adds up a folder or the marked items.
 
 ## Titles
 

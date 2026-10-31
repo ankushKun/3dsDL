@@ -78,6 +78,14 @@ Result remove(const std::string &path, Observer &observer, uint64_t &done,
 bool move(const std::string &source, const std::string &destination,
           std::string &error);
 
+// Puts what is in the folder source into the folder destination, which
+// exists. An entry there with the same name is replaced, except that a
+// folder meeting a folder is merged the same way. With moving set, entries
+// are moved and source is deleted once empty; otherwise they are copied,
+// with done and total as for copy.
+Result merge(const std::string &source, const std::string &destination,
+             bool moving, Observer &observer, uint64_t &done, uint64_t total);
+
 bool isFolder(const std::string &path);
 bool exists(const std::string &path);
 // True when path is folder itself or anything below it.

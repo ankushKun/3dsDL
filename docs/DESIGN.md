@@ -138,8 +138,8 @@ A recessed panel holds rows 27 px tall on a 31 px pitch: white pills with a
 star before it on Files' favourites. Six rows fit; the D-pad's left and
 right, L/R and the counter page through the rest. A list that gives L or R
 a job of its own, as Files does, pages with the D-pad only. In every list a tap highlights a row and
-a tap on the highlighted row opens it. Marked rows turn light blue with a Marked
-badge. The scrollbar's column takes a drag: the thumb follows the stylus, and
+a tap on the highlighted row opens it. Marked rows turn light blue and their
+icon becomes a blue check; in Files a tap on a row's icon marks it. The scrollbar's column takes a drag: the thumb follows the stylus, and
 a touch on the track brings the thumb's middle there. A list that fills in
 while open keeps the row at the top of the view in place as rows arrive above
 it; only a list nobody has touched stays at its first row. A list can put
@@ -167,6 +167,7 @@ strip for a red button and a 30 px dark Cancel strip.
 | Installing | icon, name, progress | do not turn off |
 | Installed | icon, name, time taken | dialog: Close / Launch |
 | Files | details of the highlighted entry; a picture's preview, a song's cover; L Favourites and R's star in the corner tabs | path, X Sort, six rows, Back, page counter, Options |
+| Already here | the folder, how many clash and their names, files and folders tagged | Replace All (Merge All for folders, Replace and Merge for both), Keep Both, Skip These, Ask for Each, Cancel; one clash asks Keep Both / Replace (Merge) / Skip |
 | Favourites | details of the highlighted favourite, as Files shows it; R's gold star in the corner tab | starred folders and files in the order they were starred, each with its folder, or Missing; Back, R Remove; A opens a folder, or a file's folder with it highlighted |
 | File options | the file the choices act on | eight small buttons in two columns |
 | Picture viewer | the picture, nothing else | name, size, position, Previous / Next |

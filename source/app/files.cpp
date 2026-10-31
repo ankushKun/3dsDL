@@ -1055,6 +1055,8 @@ void App::browseFiles(const std::string &select)
         spec.actionKey = "Y";
         spec.actionKeys = KEY_Y;
         spec.longPressKey = KEY_Y;
+        // A tap on an entry's icon marks it, as SELECT does.
+        spec.iconTapKey = KEY_SELECT;
         // L opens Favourites and R stars the highlighted entry, as the top
         // screen's corners say.
         spec.extraKeys = KEY_SELECT | KEY_START | KEY_L | KEY_R;
@@ -1089,10 +1091,11 @@ void App::browseFiles(const std::string &select)
                     starred.count(favorites::key(favoritePath(current, entry))) > 0) {
                     item.flag = ui::Icon::Star;
                 }
+                // A marked entry's icon, where a tap marks it, is a check.
                 item.marked = markedSet.count(current + entry.name) > 0;
                 if (item.marked) {
-                    item.badge = "Marked";
-                    item.badgeColor = ui::color::Tag;
+                    item.icon = ui::Icon::Check;
+                    item.iconColor = ui::color::Tag;
                 }
                 spec.items.push_back(item);
             }
@@ -1743,6 +1746,7 @@ bool App::entryOptions(const std::string &folder,
         return folderOptions(folder, entries, complete, marked);
     }
     enum class Action {
+        Paste,
         Open,
         Install,
         InstallDelete,
@@ -1799,6 +1803,10 @@ bool App::entryOptions(const std::string &folder,
         single && std::find(marked.begin(), marked.end(), path) != marked.end();
     const std::string favorite = path + (isFolder ? "/" : "");
 
+    // What was cut or copied goes into this folder in one step from here.
+    if (!clipboard_.empty()) {
+        add(clipboardCut_ ? "Move Here" : "Paste Here", Action::Paste);
+    }
     if (single && kind == Kind::Cia) {
         add("Install", Action::Install);
         add("Install and Delete", Action::InstallDelete);
@@ -1894,6 +1902,8 @@ bool App::entryOptions(const std::string &folder,
     }
 
     switch (actions[choice]) {
+    case Action::Paste:
+        return pasteInto(folder);
     case Action::Open:
         if (isFolder) {
             filesFolder_ = path + "/";
@@ -2347,9 +2357,12 @@ bool App::pasteInto(const std::string &folder)
     struct Step {
         std::string source;
         std::string destination;
-        bool replace = false;
+        bool folder = false;
+        bool clash = false;   // something here has its name
+        bool replace = false; // what is here goes, or a folder here is merged
+        bool merge = false;
     };
-    std::vector<Step> steps;
+    std::vector<Step> planned;
     std::vector<std::string> problems;
     // From the folders' listings, with each destination claimed as it is
     // chosen, so two items never pick the same free name.
@@ -2358,15 +2371,19 @@ bool App::pasteInto(const std::string &folder)
         return lookup.exists(path);
     };
 
+    // Everything is planned before anything is asked, so the clashes can
+    // be asked about together.
     for (const std::string &source : clipboard_) {
         if (!lookup.exists(source)) {
             problems.push_back(fileops::name(source) + " no longer exists.");
             continue;
         }
         const std::string name = fileops::name(source);
-        Step step {source, folder + name, false};
-        const bool folderSource = lookup.isFolder(source);
-        if (folderSource && fileops::isInside(step.destination, source)) {
+        Step step;
+        step.source = source;
+        step.destination = folder + name;
+        step.folder = lookup.isFolder(source);
+        if (step.folder && fileops::isInside(step.destination, source)) {
             problems.push_back(name + " cannot go inside itself.");
             continue;
         }
@@ -2378,28 +2395,112 @@ bool App::pasteInto(const std::string &folder)
                 // Copying into its own folder makes "name (1)".
                 step.destination = naming::unusedPath(folder, name, exists);
             } else {
-                ui::Dialog dialog;
-                dialog.header = "paste";
-                dialog.title = name + " is already here.";
-                dialog.tone = ui::Tone::Warning;
-                dialog.buttons = {"Keep Both", "Replace", "Skip"};
-                dialog.dangerous = 1;
-                dialog.cancelButton = 2;
-                const int answer = ui::choose(dialog);
-                if (answer == 0) {
-                    step.destination = naming::unusedPath(folder, name, exists);
-                } else if (answer == 1) {
-                    step.replace = true;
-                } else {
-                    continue;
-                }
+                step.clash = true;
+                step.merge = step.folder && lookup.isFolder(step.destination);
             }
         }
         if (step.destination.empty()) {
             problems.push_back("No free name was found for " + name + ".");
             continue;
         }
-        lookup.claim(step.destination, folderSource);
+        if (!step.clash) {
+            lookup.claim(step.destination, step.folder);
+        }
+        planned.push_back(step);
+    }
+
+    enum class Answer { KeepBoth, Replace, Skip };
+    const auto askOne = [&](const Step &step) {
+        ui::Dialog dialog;
+        dialog.header = "paste";
+        dialog.title = fileops::name(step.source) + " is already here.";
+        dialog.tone = ui::Tone::Warning;
+        dialog.buttons = {"Keep Both", step.merge ? "Merge" : "Replace", "Skip"};
+        dialog.dangerous = 1;
+        dialog.cancelButton = 2;
+        const int answer = ui::choose(dialog);
+        return answer == 0 ? Answer::KeepBoth
+             : answer == 1 ? Answer::Replace
+                           : Answer::Skip;
+    };
+    std::vector<size_t> clashes;
+    size_t merges = 0;
+    for (size_t index = 0; index < planned.size(); ++index) {
+        if (planned[index].clash) {
+            clashes.push_back(index);
+            merges += planned[index].merge ? 1 : 0;
+        }
+    }
+    // One answer for all of them, or one each.
+    std::vector<Answer> answers(planned.size(), Answer::Replace);
+    if (clashes.size() == 1) {
+        answers[clashes[0]] = askOne(planned[clashes[0]]);
+    } else if (clashes.size() > 1) {
+        const std::vector<ui::MenuItem> items = {
+            {merges == 0               ? "Replace All"
+             : merges == clashes.size() ? "Merge All"
+                                        : "Replace and Merge",
+             true, true},
+            {"Keep Both", false, true},
+            {"Skip These", false, true},
+            {"Ask for Each", false, true}};
+        const int choice = ui::menu(
+            items,
+            [&](int) {
+                ui::drawTopChrome(folderTitle(folder), ui::Icon::Folder,
+                                  ui::color::IconOrange);
+                ui::drawPanel();
+                std::vector<ui::Fact> facts = {
+                    {"Already here", plural(clashes.size(), "item"),
+                     ui::color::Badge}};
+                for (size_t shown = 0; shown < clashes.size() && shown < 5;
+                     ++shown) {
+                    const Step &step = planned[clashes[shown]];
+                    facts.push_back({step.folder ? "Folder" : "File",
+                                     fileops::name(step.source)});
+                }
+                if (clashes.size() > 5) {
+                    facts.push_back({"And", std::to_string(clashes.size() - 5) +
+                                                " more",
+                                     ui::color::Neutral});
+                }
+                ui::drawFacts(facts);
+            },
+            "Cancel");
+        if (choice < 0) {
+            return false;
+        }
+        for (const size_t index : clashes) {
+            answers[index] = choice == 0   ? Answer::Replace
+                           : choice == 1   ? Answer::KeepBoth
+                           : choice == 2   ? Answer::Skip
+                                           : askOne(planned[index]);
+            if (!ui::keepRunning()) {
+                return false;
+            }
+        }
+    }
+    std::vector<Step> steps;
+    for (size_t index = 0; index < planned.size(); ++index) {
+        Step step = planned[index];
+        if (step.clash) {
+            if (answers[index] == Answer::Skip) {
+                continue;
+            }
+            if (answers[index] == Answer::KeepBoth) {
+                step.destination = naming::unusedPath(
+                    folder, fileops::name(step.source), exists);
+                step.merge = false;
+                if (step.destination.empty()) {
+                    problems.push_back("No free name was found for " +
+                                       fileops::name(step.source) + ".");
+                    continue;
+                }
+            } else {
+                step.replace = true;
+            }
+            lookup.claim(step.destination, step.folder);
+        }
         steps.push_back(step);
     }
 
@@ -2442,6 +2543,18 @@ bool App::pasteInto(const std::string &folder)
                         all.status = fileops::Status::Cancelled;
                         break;
                     }
+                    if (step.replace && step.merge) {
+                        const fileops::Result part =
+                            fileops::merge(step.source, step.destination, cut,
+                                           observer, done, bytes);
+                        all.files += part.files;
+                        if (part.status != fileops::Status::Ok) {
+                            all.status = part.status;
+                            all.message = part.message;
+                            break;
+                        }
+                        continue;
+                    }
                     if (step.replace) {
                         uint64_t removed = 0;
                         const fileops::Result cleared = fileops::remove(
@@ -2475,6 +2588,12 @@ bool App::pasteInto(const std::string &folder)
             });
     }
 
+    // Files a merge replaced may have kept their sizes, so their dates go.
+    for (const Step &step : steps) {
+        if (step.replace && step.merge) {
+            fileIndex_.rewritten(step.destination);
+        }
+    }
     // Moved items are no longer where the clipboard points; anything that
     // did not move stays ready to try again. Favourites follow what moved.
     if (clipboardCut_) {
@@ -2487,8 +2606,9 @@ bool App::pasteInto(const std::string &folder)
         bool followed = false;
         for (const Step &step : steps) {
             if (!moved.exists(step.source)) {
-                // What it replaced was deleted.
-                if (step.replace) {
+                // What it replaced was deleted; a folder it merged into
+                // is still there.
+                if (step.replace && !step.merge) {
                     followed |= favorites::removed(settings_.favorites,
                                                    step.destination);
                 }

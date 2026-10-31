@@ -306,6 +306,63 @@ bool move(const std::string &source, const std::string &destination,
     return true;
 }
 
+Result merge(const std::string &source, const std::string &destination,
+             bool moving, Observer &observer, uint64_t &done, uint64_t total)
+{
+    Result result;
+    if (isInside(destination, source)) {
+        result.status = Status::Failed;
+        result.message = "A folder cannot be merged into itself.";
+        return result;
+    }
+    std::vector<std::string> names;
+    if (!children(source, names)) {
+        result.status = Status::Failed;
+        result.message = failure("Could not open the folder", source);
+        return result;
+    }
+    for (const std::string &entry : names) {
+        if (observer.cancelRequested()) {
+            result.status = Status::Cancelled;
+            return result;
+        }
+        const std::string from = join(source, entry);
+        const std::string to = join(destination, entry);
+        Result part;
+        if (exists(to) && isFolder(from) && isFolder(to)) {
+            part = merge(from, to, moving, observer, done, total);
+        } else {
+            if (exists(to)) {
+                uint64_t removed = 0;
+                const Result cleared = remove(to, observer, removed, 0);
+                if (cleared.status != Status::Ok) {
+                    return cleared;
+                }
+            }
+            if (moving) {
+                if (!move(from, to, part.message)) {
+                    part.status = Status::Failed;
+                } else {
+                    part.files = 1;
+                }
+            } else {
+                part = copy(from, to, observer, done, total);
+            }
+        }
+        result.files += part.files;
+        if (part.status != Status::Ok) {
+            result.status = part.status;
+            result.message = part.message;
+            return result;
+        }
+    }
+    if (moving && rmdir(source.c_str()) != 0) {
+        result.status = Status::Failed;
+        result.message = failure("Could not delete the folder", source);
+    }
+    return result;
+}
+
 bool isFolder(const std::string &path)
 {
     struct stat info {};
