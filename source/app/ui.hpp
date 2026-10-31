@@ -460,6 +460,9 @@ struct ListSpec {
     std::function<bool()> update;
     // While true, a spinner shows that more rows are on their way.
     std::function<bool()> loading;
+    // Called every frame after update: true closes the list with key 0,
+    // such as when what it shows changed underneath and must be read again.
+    std::function<bool()> close;
 };
 
 struct ListResult {

@@ -1248,7 +1248,13 @@ void App::receiveScreen()
             }
         }
         receiveLog_.settle(now);
+        return changes;
     };
+    takePageChanges_ = takeReports;
+    struct Unhook {
+        App &app;
+        ~Unhook() { app.takePageChanges_ = nullptr; }
+    } unhook{*this};
 
     // Someone using the page holds the console awake, and the linger after
     // each request covers the gap before the next, so closing the lid never

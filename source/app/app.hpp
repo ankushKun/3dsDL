@@ -15,6 +15,8 @@
 #include <3ds.h>
 
 #include <atomic>
+#include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -327,6 +329,10 @@ private:
     fileindex::Index fileIndex_;
     int64_t sdFreeSeen_ = -1; // free space when the index was last checked
     std::atomic<bool> sdMayHaveChanged_ {false};
+    // Set while Receive is open: hands over what the page changed on the
+    // SD card since the last call, already given to sdChanged, so Files
+    // opened from Receive can read its folder again.
+    std::function<std::deque<std::string>()> takePageChanges_;
     aptHookCookie aptCookie_ {};
     uint64_t indexCard_ = 0; // platform::sdCardId when it was loaded
     Thread indexLoader_ = nullptr;

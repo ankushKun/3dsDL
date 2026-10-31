@@ -981,7 +981,9 @@ void App::browseFiles(const std::string &select)
         if (reload) {
             reload = false;
             if (current != "sdmc:/" && !fs::directoryExists(current)) {
-                current = "sdmc:/";
+                while (current != "sdmc:/" && !fs::directoryExists(current)) {
+                    current = naming::parentFolder(current);
+                }
                 cursor = 0;
                 marked.clear();
             }
@@ -1228,6 +1230,23 @@ void App::browseFiles(const std::string &select)
             return !complete || (bySize && sizing && !sizer.finished()) ||
                    (byDate && dating && !dates.finished());
         };
+        // Opened from Receive, the folder is read again when the page
+        // changes something in it, or the folder itself. A batch of uploads
+        // changes it many times, so it waits for the last read to finish
+        // and the rows to rest for a second, leaving the card to the page.
+        bool pageChanged = false;
+        spec.close = [&]() {
+            if (!takePageChanges_) {
+                return false;
+            }
+            const std::string here = text::lower(current);
+            for (const std::string &path : takePageChanges_()) {
+                pageChanged = pageChanged ||
+                              fileops::isInside(here, text::lower(path)) ||
+                              text::lower(naming::parentFolder(path)) == here;
+            }
+            return pageChanged && complete && osGetTime() - shownAt >= 1000;
+        };
 
         spec.drawTop = [&](int index) {
             const std::string title =
@@ -1298,7 +1317,11 @@ void App::browseFiles(const std::string &select)
             onEntry ? current + entries[position].name : "";
 
         if (result.key == 0) {
-            return;
+            if (!pageChanged) {
+                return;
+            }
+            reload = true;
+            continue;
         }
         if (result.key == KEY_B) {
             if (atRoot) {

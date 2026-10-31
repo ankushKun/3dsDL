@@ -3345,6 +3345,9 @@ ListResult runListQuietly(const ListSpec &spec, int &cursor, float *offset)
                 }
             }
         }
+        if (spec.close && spec.close()) {
+            return {0, cursor};
+        }
         const bool loading = spec.loading && spec.loading();
         const Input input = readInput();
         if (count > 0) {

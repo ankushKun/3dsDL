@@ -289,6 +289,10 @@ with a few hundred files.
     files only the old one had stay, and the console's Files shows the new
     dates. Copy a file into its own folder (Cmd+C, Cmd+V): "name (1)". On a
     phone a long press starts picking, and the drawer opens the places.
+58n. Open Files from a Receive row (Show in Files) and, from the page,
+    rename, upload and delete in that folder: the console's list follows
+    within a second or two. Moving the folder itself away lands Files on
+    the nearest folder still there.
 
 ### Saves, tickets and sounds
 
