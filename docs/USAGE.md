@@ -31,7 +31,7 @@ Everything that comes in or goes out stays listed on the touch screen until 3dsD
 The page is also a file browser for the SD card, with no FTP app needed: the SD card's usual folders and Files' favourites on the left, the folder in the middle, and what is selected on the right (on a phone the left side slides in, and a bar at the bottom holds the actions). The first time a device opens a folder, the console asks whether to allow that device, and the answer lasts until you leave Receive. From the page you can:
 
 - upload files or whole folders with **Upload** or by dropping them on the folder or on a folder in the sidebar, up to the 4 GiB a FAT32 card allows, with progress, speed and cancel for each file under **Transfers**;
-- download files, open pictures and text in the browser, and edit text files in place;
+- download files, open pictures in the browser, and edit text and config files in a code editor with line numbers, colours for INI, JSON, XML, Lua and other formats, and search and replace (<kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>F</kbd>, and <kbd>Cmd</kbd>/<kbd>Ctrl</kbd>+<kbd>S</kbd> to save);
 - select several entries with Shift and Cmd or Ctrl clicks, a box drawn with the mouse, or a long press on a phone;
 - move or copy them with **Move To** and **Copy To**, which pick the folder in columns, by dragging them onto a folder (hold Option, or Ctrl on Windows, to copy), or with cut, copy and paste on the keyboard. When names are already taken the page asks once: **Skip**, **Keep Both**, or **Replace**, which merges a folder into one of the same name;
 - make folders, rename and delete, one entry or several at once;

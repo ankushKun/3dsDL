@@ -106,6 +106,9 @@ struct FileSharing {
     std::function<ConsoleStatus()> status;
     // The running 3dsDL's version, to name its own CIAs (cia::versionText).
     std::string appVersion;
+    // The page's code editor, gzipped (romfs/web/editor.js.gz), served at
+    // /editor.js. Empty, or unreadable, leaves the page its plain text box.
+    std::string editorScript;
     // Called a few times a second during a transfer, on the server's thread.
     std::function<void(const Transfer &)> progress;
     // Called on the server's thread with each path the page has written,

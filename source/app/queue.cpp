@@ -1126,6 +1126,7 @@ void App::receiveScreen()
     sharing.totalSpace = []() { return platform::sdTotalBytes(); };
     sharing.status = [&job]() { return job.snapshot(); };
     sharing.appVersion = APP_VERSION;
+    sharing.editorScript = "romfs:/web/editor.js.gz";
     sharing.progress = [&job](const net::Transfer &transfer) {
         job.progress(transfer);
     };

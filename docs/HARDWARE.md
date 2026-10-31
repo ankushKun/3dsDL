@@ -289,6 +289,12 @@ with a few hundred files.
     files only the old one had stay, and the console's Files shows the new
     dates. Copy a file into its own folder (Cmd+C, Cmd+V): "name (1)". On a
     phone a long press starts picking, and the drawer opens the places.
+58m. On the page, rename a file changing only its case: the card and the
+    console's Files show the new case. Open an `.ini`, a `.json` and a long
+    one-line `.txt` on a computer and a phone: the editor shows line
+    numbers and colours, Cmd+F finds, Cmd+S saves (check the file on the
+    console), and closing with changes asks. On a phone, typing gets no
+    autocorrect or curly quotes.
 58n. Open Files from a Receive row (Show in Files) and, from the page,
     rename, upload and delete in that folder: the console's list follows
     within a second or two. Moving the folder itself away lands Files on

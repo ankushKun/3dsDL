@@ -251,6 +251,36 @@ void sendJson(int client, const std::string &json)
     sendAll(client, remote::httpResponse(200, "application/json", json));
 }
 
+// The code editor, which the page loads the first time a file opens. The
+// browser keeps it and asks again with its tag, so it comes over once for
+// each version of 3dsDL.
+void sendEditor(int client, const FileSharing &sharing,
+                const remote::HttpRequest &request)
+{
+    std::string script;
+    if (sharing.editorScript.empty() || !fs::readFile(sharing.editorScript, script)) {
+        sendAll(client, remote::httpResponse(404, "text/plain", "Not found\n"));
+        return;
+    }
+    char tag[16];
+    std::snprintf(tag, sizeof(tag), "\"%08lx\"",
+                  static_cast<unsigned long>(
+                      crc32(0L, reinterpret_cast<const Bytef *>(script.data()),
+                            static_cast<uInt>(script.size())) &
+                      0xffffffffUL));
+    const std::string head = std::string("Cache-Control: no-cache\r\nETag: ") + tag +
+                             "\r\nConnection: close\r\n\r\n";
+    const auto seen = request.headers.find("if-none-match");
+    if (seen != request.headers.end() && seen->second == tag) {
+        sendAll(client, "HTTP/1.1 304 Not Modified\r\n" + head);
+        return;
+    }
+    sendAll(client, "HTTP/1.1 200 OK\r\nContent-Type: text/javascript; charset=utf-8\r\n"
+                    "Content-Encoding: gzip\r\nContent-Length: " +
+                        std::to_string(script.size()) +
+                        "\r\nX-Content-Type-Options: nosniff\r\n" + head + script);
+}
+
 // Reports a transfer to FileSharing::progress a few times a second. start
 // says which file it is; quiet reports nothing, for files the page only
 // shows.
@@ -1368,6 +1398,8 @@ bool Receiver::serveWeb(int client, const std::string &from, Received &out)
                                 " links. They are downloading on the 3DS.";
         sendAll(client, remote::httpResponse(200, html,
                                              remote::page(message, sent != "0")));
+    } else if (request.path == "/editor.js" && request.method == "GET") {
+        sendEditor(client, sharing_, request);
     } else if (request.path == "/send" &&
                (request.method == "POST" || request.method == "GET")) {
         if (request.method == "POST" &&

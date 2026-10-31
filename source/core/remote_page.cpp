@@ -467,7 +467,7 @@ const char *const PageEnd = R"PAGE(<form method="post" action="/send" class="wel
 <dialog id="viewer" class="viewer"><button class="close" id="vclose" aria-label="Close"></button><div class="stage"><span class="spin" id="vspin"></span><img id="vimg" alt=""><button class="nav prev" id="vprev" aria-label="Previous"></button><button class="nav next" id="vnext" aria-label="Next"></button></div>
 <div class="vbar"><span id="vname"></span><a class="btn small" id="vdl" download>Download</a></div></dialog>
 <dialog id="editor" class="editor"><button class="close" id="eclose" aria-label="Close"></button><div class="dbody"><h2><span id="ename"></span><i class="dirty" title="Not saved"></i></h2>
-<textarea id="etext" spellcheck="false"></textarea><p class="err" id="eerr" hidden></p></div>
+<textarea id="etext" spellcheck="false" autocorrect="off" autocapitalize="off"></textarea><div id="ecode" hidden></div><p class="err" id="eerr" hidden></p></div>
 <div class="row2"><span class="muted" id="einfo"></span><span><button class="btn" id="ecancel">Close</button> <button class="btn primary" id="esave">Save</button></span></div></dialog>
 <script>
 'use strict';
@@ -1772,32 +1772,53 @@ $('#viewer').addEventListener('touchend', e => {
   if (Math.abs(dx) > 50 && V.list.length > 1) flip(dx < 0 ? 1 : -1);
   touchX = null;
 });
-// The text editor.
-const E = {path: '', saved: ''};
+// The text editor: CodeMirror from the 3DS (/editor.js), or the plain text
+// box when it cannot load.
+const E = {path: '', saved: '', code: null, loader: null};
+function loadEditor() {
+  if (!E.loader) E.loader = new Promise(resolve => {
+    const s = document.createElement('script');
+    s.src = '/editor.js';
+    s.onload = () => resolve(window.CodeEditor || null);
+    s.onerror = () => { E.loader = null; s.remove(); resolve(null); };
+    document.head.append(s);
+  });
+  return E.loader;
+}
 async function edit(path) {
+  const loading = loadEditor();
   let text;
   try {
     const r = await run(() => call('GET', fileUrl(path), undefined, {raw: true}));
     if (!r.ok) throw new Error('Could not open ' + base(path) + '.');
     text = await r.text();
   } catch (e) { return fail(e); }
+  // A console busy with an upload may take a while; the text box does then.
+  const code = await Promise.race([loading, sleep(3000).then(() => null)]);
   Object.assign(E, {path, saved: text});
   $('#ename').textContent = base(path);
-  $('#etext').value = text;
+  if (E.code) { E.code.destroy(); E.code = null; }
+  if (code) {
+    try { E.code = code.create({parent: $('#ecode'), text, name: base(path), change: editInfo, save}); } catch (e) {}
+  }
+  $('#ecode').hidden = !E.code;
+  $('#etext').hidden = !!E.code;
+  $('#etext').value = E.code ? '' : text;
   $('#eerr').hidden = true;
   editInfo();
   $('#editor').showModal();
-  $('#etext').focus();
-  $('#etext').setSelectionRange(0, 0);
+  if (E.code) E.code.focus();
+  else { $('#etext').focus(); $('#etext').setSelectionRange(0, 0); }
 }
+const editorText = () => E.code ? E.code.text() : $('#etext').value;
 function editInfo() {
-  const t = $('#etext').value;
+  const t = editorText();
   $('#editor').classList.toggle('changed', t !== E.saved);
-  $('#einfo').textContent = plural(t.split('\n').length, 'line') + ', ' + size(new Blob([t]).size) + (t !== E.saved ? ', not saved' : '');
+  $('#einfo').textContent = plural(E.code ? E.code.lines() : t.split('\n').length, 'line') + ', ' + size(new Blob([t]).size) + (t !== E.saved ? ', not saved' : '');
 }
 $('#etext').addEventListener('input', editInfo);
 async function save() {
-  const b = $('#esave'), text = $('#etext').value;
+  const b = $('#esave'), text = editorText();
   b.classList.add('busy');
   try {
     await api('PUT', '/api/file?replace=1&path=' + enc(E.path), text, 0, {retry: true});
@@ -1808,7 +1829,7 @@ async function save() {
   } catch (e) { $('#eerr').textContent = e.message || 'Not saved.'; $('#eerr').hidden = false; } finally { b.classList.remove('busy'); }
 }
 async function closeEditor() {
-  if ($('#etext').value !== E.saved && await ask('Close without saving?', 'The changes to ' + base(E.path) + ' will be lost.', {buttons: ['Keep Editing', 'Close'], danger: true}) !== 1) return;
+  if (editorText() !== E.saved && await ask('Close without saving?', 'The changes to ' + base(E.path) + ' will be lost.', {buttons: ['Keep Editing', 'Close'], danger: true}) !== 1) return;
   $('#editor').close();
 }
 $('#esave').onclick = save;

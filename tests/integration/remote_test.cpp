@@ -751,6 +751,49 @@ TEST("remote server: answers end cleanly, and a client that stays does not hold 
     ::close(stays);
 }
 
+TEST("remote server: the code editor comes once for each version, to anyone")
+{
+    TempRoot root;
+    const std::string script = root.path + "/editor.js.gz";
+    CHECK(fs::writeFile(script, "not really gzip"));
+    net::FileSharing sharing;
+    sharing.root = root.path;
+    sharing.access = [](const std::string &, const std::string &, bool) {
+        return net::Access::Unknown;
+    };
+    sharing.editorScript = script;
+    net::Receiver receiver;
+    std::string error;
+    CHECK(receiver.open(0, 0, 0, error));
+    receiver.shareFiles(sharing);
+    Serving serving(receiver);
+    const unsigned short port = receiver.webPort();
+
+    std::string response = get(port, "/editor.js");
+    CHECK(startsWith(response, "HTTP/1.1 200"));
+    CHECK(response.find("Content-Encoding: gzip\r\n") != std::string::npos);
+    CHECK(bodyOf(response) == "not really gzip");
+    const size_t at = response.find("ETag: ");
+    CHECK(at != std::string::npos);
+    const std::string tag = response.substr(at + 6, response.find("\r\n", at) - at - 6);
+    CHECK_EQ(tag.size(), static_cast<size_t>(10));
+
+    response = roundTrip(port, "GET /editor.js HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                               "If-None-Match: " + tag + "\r\n\r\n");
+    CHECK(startsWith(response, "HTTP/1.1 304"));
+    CHECK(bodyOf(response).empty());
+
+    // A new version answers in full.
+    CHECK(fs::writeFile(script, "a new version"));
+    response = roundTrip(port, "GET /editor.js HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                               "If-None-Match: " + tag + "\r\n\r\n");
+    CHECK(startsWith(response, "HTTP/1.1 200"));
+    CHECK(bodyOf(response) == "a new version");
+
+    CHECK(fs::removeFile(script));
+    CHECK(startsWith(get(port, "/editor.js"), "HTTP/1.1 404"));
+}
+
 TEST("remote server: status, links for the page, hidden files and titles")
 {
     TempRoot root;

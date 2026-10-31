@@ -16,3 +16,6 @@
 # Host test build output
 /tests/build/
 __pycache__/
+
+# The page editor's build (scripts/make-editor.sh)
+/resources/editor/node_modules/

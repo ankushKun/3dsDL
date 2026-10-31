@@ -82,7 +82,7 @@ Build options, building without Docker and the project layout are in the [guide]
 - [FBI](https://github.com/Steveice10/FBI) by Steveice10, whose install sequence, seed handling and remote install protocol 3dsDL follows.
 - [Checkpoint](https://github.com/BernardoGiordano/Checkpoint) by Bernardo Giordano, whose backup format and restore steps 3dsDL matches.
 - [Colby Shores](https://github.com/colbyshores), for the socket buffer and TLS randomness findings.
-- [libcurl](https://curl.se/), [Mbed TLS](https://github.com/Mbed-TLS/mbedtls), the [Mozilla CA bundle](https://curl.se/docs/caextract.html), [quirc](https://github.com/dlbeer/quirc) ([license](LICENSE-quirc.md)), [QR Code generator](https://www.nayuki.io/page/qr-code-generator-library), [stb_image](https://github.com/nothings/stb), [libjpeg-turbo](https://libjpeg-turbo.org/), and [devkitPro](https://devkitpro.org/) with libctru and Citro2D.
+- [libcurl](https://curl.se/), [Mbed TLS](https://github.com/Mbed-TLS/mbedtls), the [Mozilla CA bundle](https://curl.se/docs/caextract.html), [quirc](https://github.com/dlbeer/quirc) ([license](LICENSE-quirc.md)), [QR Code generator](https://www.nayuki.io/page/qr-code-generator-library), [stb_image](https://github.com/nothings/stb), [libjpeg-turbo](https://libjpeg-turbo.org/), [CodeMirror](https://codemirror.net/) for the page's editor, and [devkitPro](https://devkitpro.org/) with libctru and Citro2D.
 
 ## License
 
