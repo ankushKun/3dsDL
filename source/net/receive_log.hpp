@@ -79,6 +79,11 @@ public:
     void settle(int64_t now);
     // Everything still on its way stops, as Receive closes.
     void stopAll(int64_t now);
+    // Drops the rows that are done, keeping those still on their way.
+    // True when it dropped any.
+    bool clearFinished();
+    // Whether any row is done, so there is something to clear.
+    bool anyFinished() const;
 
     const std::vector<Row> &rows() const { return rows_; }
     // Goes up with every change, so a screen knows to look again.

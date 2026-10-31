@@ -175,3 +175,26 @@ TEST("receive log: only the newest rows are kept")
     CHECK_EQ(log.rows().size(), Log::MaxRows);
     CHECK_EQ(log.rows()[0].name, "f" + std::to_string(Log::MaxRows + 4));
 }
+
+TEST("receive log: clearing drops what is done and keeps what is on its way")
+{
+    Log log;
+    CHECK(!log.anyFinished());
+    CHECK(!log.clearFinished());
+    log.transfer(ended(upload("sdmc:/cias/a.cia", 10, 10), true), 1);
+    log.transfer(ended(upload("sdmc:/cias/b.cia", 4, 10), false, "Lost"), 2);
+    log.transfer(upload("sdmc:/cias/c.cia", 3, 10), 3);
+    CHECK_EQ(log.rows().size(), static_cast<size_t>(3));
+    CHECK(log.anyFinished());
+    const uint32_t before = log.generation();
+    CHECK(log.clearFinished());
+    CHECK(log.generation() != before);
+    CHECK_EQ(log.rows().size(), static_cast<size_t>(1));
+    CHECK_EQ(log.rows()[0].name, std::string("c.cia"));
+    CHECK(log.rows()[0].state == Log::State::Active);
+    CHECK(!log.anyFinished());
+    CHECK(!log.clearFinished());
+    // What arrives after carries on as before.
+    log.transfer(ended(upload("sdmc:/cias/c.cia", 10, 10), true), 4);
+    CHECK(log.rows()[0].state == Log::State::Received);
+}

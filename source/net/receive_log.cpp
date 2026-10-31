@@ -216,6 +216,28 @@ void ReceiveLog::stopAll(int64_t now)
     }
 }
 
+bool ReceiveLog::clearFinished()
+{
+    const size_t before = rows_.size();
+    rows_.erase(std::remove_if(rows_.begin(), rows_.end(),
+                               [](const Row &row) {
+                                   return row.state != State::Active;
+                               }),
+                rows_.end());
+    if (rows_.size() == before) {
+        return false;
+    }
+    ++generation_;
+    return true;
+}
+
+bool ReceiveLog::anyFinished() const
+{
+    return std::any_of(rows_.begin(), rows_.end(), [](const Row &row) {
+        return row.state != State::Active;
+    });
+}
+
 float progress(const ReceiveLog::Row &row)
 {
     const auto part = [](uint64_t done, uint64_t total) {

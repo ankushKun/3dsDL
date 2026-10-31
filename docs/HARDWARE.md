@@ -273,6 +273,8 @@ with a few hundred files.
     before the question.
 58j. A link that redirects (a GitHub release asset) shows the host it ends
     on before Download, after a short Checking wait that B stops.
+58k. Clear on Receive (X) empties the list of what is done while an upload
+    still on its way keeps its row, and the files stay on the card.
 
 ### Saves, tickets and sounds
 

@@ -1789,6 +1789,11 @@ void App::receiveScreen()
         for (const Row &row : receiveLog_.rows()) {
             spec.items.push_back(rowItem(row));
         }
+        // Clear empties the list of what is done; the files stay.
+        const bool clearable = receiveLog_.anyFinished();
+        spec.action = clearable ? "Clear" : "";
+        spec.actionKey = "X";
+        spec.actionKeys = clearable ? static_cast<u32>(KEY_X) : 0u;
         shown = receiveLog_.generation();
     };
     spec.update = [&]() {
@@ -1829,6 +1834,11 @@ void App::receiveScreen()
     while (ui::keepRunning() && !quit_) {
         fillRows();
         const ui::ListResult result = ui::runList(spec, cursor);
+        if (result.key == KEY_X) {
+            receiveLog_.clearFinished();
+            cursor = 0;
+            continue;
+        }
         if (result.key != KEY_A || result.index < 0 ||
             result.index >= static_cast<int>(receiveLog_.rows().size())) {
             break;
