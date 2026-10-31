@@ -11,6 +11,10 @@
   <a href="https://github.com/ankushKun/3dsDL/releases"><img alt="Downloads" src="https://img.shields.io/github/downloads/ankushKun/3dsDL/total?color=3fa65a"></a>
   <a href="https://github.com/ankushKun/3dsDL/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/ankushKun/3dsDL/ci.yml?branch=main&label=CI"></a>
   <a href="LICENSE"><img alt="License: GPLv3" src="https://img.shields.io/badge/license-GPLv3-8c8466"></a>
+  <br>
+  <a href="https://github.com/sponsors/ankushKun"><img alt="Sponsor on GitHub" src="https://img.shields.io/badge/Sponsor-EA4AAA?logo=githubsponsors&logoColor=white"></a>
+  <a href="https://ko-fi.com/ankushkun"><img alt="Support on Ko-fi" src="https://img.shields.io/badge/Ko--fi-FF5E5B?logo=kofi&logoColor=white"></a>
+  <a href="https://buymeacoffee.com/ankushkun"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy_Me_a_Coffee-FFDD00?logo=buymeacoffee&logoColor=black"></a>
 </p>
 
 <p align="center">
