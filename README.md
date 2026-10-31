@@ -63,7 +63,7 @@ You need a 3DS with custom firmware ([3ds.hacks.guide](https://3ds.hacks.guide/)
 You only install 3dsDL once. It checks GitHub for a new version when it opens and shows a notification when there is one. **Settings → Updates** downloads the right build, checks it against the release's SHA-256 checksum and installs it, without FBI or a computer. The one exception is the 0.7.0 CIA, which crashes at start-up: install the latest release with FBI once.
 
 > [!NOTE]
-> 3dsDL is in development. Version 0.8.2 runs on real consoles, and its Files over Wi-Fi page was tested on one from a Mac: uploads, downloads, installs and `3ds.local`. Save and extra data restore and ticket export are the least tested parts, so keep a Checkpoint backup of anything important for now. The full console test plan is in [docs/HARDWARE.md](docs/HARDWARE.md).
+> 3dsDL is in development. Version 0.9.0 runs on real consoles, and its Files over Wi-Fi page was tested on one from a Mac: uploads, downloads, installs and `3ds.local`. Save and extra data restore and ticket export are the least tested parts, so keep a Checkpoint backup of anything important for now. The full console test plan is in [docs/HARDWARE.md](docs/HARDWARE.md).
 
 ## Building
 

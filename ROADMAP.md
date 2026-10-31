@@ -151,6 +151,11 @@ management, is in [docs/INSTALLER-PLAN.md](docs/INSTALLER-PLAN.md).
       both ways, with the order on the top screen; Delete Unused Tickets
       never touches installed software; Start opens a .3dsx; a crash leaves
       a log with symbols to read it.
+- [x] 0.9.0: The 3ds.local page is a file browser with copy, merge and a
+      code editor; Files has favourites, marks with a tap and asks once
+      about names taken; 7z, RAR and tar archives; .zcia installs; work
+      goes on with the lid closed; websites can send to a folder; log.txt
+      for bug reports.
 - [ ] Hardware pass (items 58a to 58f in [docs/HARDWARE.md](docs/HARDWARE.md)).
       Partly done on 2026-10-20: see the results there. Multicast works,
       so 3ds.local does.
