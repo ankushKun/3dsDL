@@ -938,6 +938,105 @@ html:not(.js) .tray {
   text-align: center;
 }
 
+/* --------------------------------------------------------------- The video
+   A 16:9 screen in the HOME Menu's dark glass bezel. The play button sits in
+   the thumbnail's empty bottom-left corner, clear of what it shows. */
+
+.tv {
+  padding: 10px;
+  border-radius: 24px;
+  background: linear-gradient(#46525e, #262f38);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.25),
+    0 4px 0 #1b222a,
+    0 14px 28px rgba(20, 32, 44, 0.22);
+}
+
+.tv-poster,
+.tv iframe {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 0;
+  border-radius: 14px;
+  background: #0b1520;
+}
+
+.tv-poster {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+  outline-offset: 4px;
+}
+
+.tv-poster img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tv-play {
+  position: absolute;
+  left: 4%;
+  bottom: 6%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  padding: 0.5em 1.15em 0.55em 0.9em;
+  border-radius: 999px;
+  border: 1px solid #0a6a94;
+  background: linear-gradient(#8ae3fb 0%, #34beed 48%, #0f98cf 52%, #0b86bd 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 4px 0 #086a96, 0 10px 20px rgba(0, 0, 0, 0.35);
+  color: #fff;
+  font: 800 clamp(13px, 2.2vw, 17px)/1 var(--font);
+  font-variant-numeric: tabular-nums;
+  text-shadow: 0 1px 1px rgba(0, 45, 70, 0.45);
+}
+
+.tv-play .icon {
+  width: 1.25em;
+  height: 1.25em;
+  filter: drop-shadow(0 1px 1px rgba(0, 45, 70, 0.45));
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tv-poster img {
+    transition: transform 700ms var(--ease-out);
+  }
+
+  .tv-play {
+    transition: transform 260ms var(--spring), box-shadow var(--dur-press) var(--ease-out);
+  }
+
+  .tv-poster:hover img {
+    transform: scale(1.025);
+  }
+
+  .tv-poster:hover .tv-play {
+    transform: translateY(-2px);
+  }
+
+  .tv-poster:active .tv-play {
+    transform: translateY(4px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 0 #086a96, 0 2px 6px rgba(0, 0, 0, 0.35);
+    transition-duration: var(--dur-press);
+  }
+}
+
+@media (max-width: 640px) {
+  .tv {
+    padding: 6px;
+    border-radius: 18px;
+  }
+
+  .tv-poster,
+  .tv iframe {
+    border-radius: 12px;
+  }
+}
+
 /* ------------------------------------------------- Features: the HOME Menu
    Without the script this is a grid of cards. With it, the icons sit on a
    touch screen and the selected one's demo shows on the top screen above. */
@@ -2568,5 +2667,174 @@ dialog::backdrop {
   }
   .buddy-text {
     width: 150px;
+  }
+}
+
+/* ---- Support: GitHub Sponsors, Buy Me a Coffee and Ko-fi, pinned to the
+   left edge opposite the 3dsFM card. Where the gutter is too narrow for
+   them they wait behind a Support tab that slides them out, as the 3dsFM
+   card does. ---- */
+.funds {
+  position: fixed;
+  left: 0;
+  top: calc(var(--head-h) + 26px);
+  z-index: 12;
+  transform: translateX(calc(-100% + 34px));
+  transition: transform 420ms var(--spring);
+  filter: drop-shadow(0 10px 18px rgba(36, 56, 78, 0.18));
+}
+/* Hover only where there is a pointer, and focus only from the keyboard, so
+   a tap on the tab can close it again. */
+.funds.is-open,
+.funds:has(:focus-visible) {
+  transform: translateX(0);
+}
+@media (hover: hover) {
+  .funds:hover {
+    transform: translateX(0);
+  }
+}
+.funds-card {
+  display: flex;
+  align-items: stretch;
+  background: var(--panel);
+  border-radius: 0 19px 19px 0;
+  box-shadow: 0 0 0 1px var(--rim), inset 0 2px 0 #fff, 0 4px 0 var(--rim-lo);
+  overflow: hidden;
+}
+.funds-list {
+  display: grid;
+  gap: 12px;
+  padding: 14px 14px 18px;
+}
+.funds-tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 34px;
+  padding: 14px 0;
+  border: 0;
+  border-radius: 0;
+  background: #e2449f;
+  color: #fff;
+  font: 400 13px/1 var(--dot);
+  letter-spacing: 0.1em;
+  writing-mode: vertical-rl;
+  cursor: pointer;
+  box-shadow: inset 3px 0 0 rgba(0, 0, 0, 0.12), inset -2px 0 0 rgba(255, 255, 255, 0.35);
+}
+.funds-tab .icon {
+  width: 15px;
+  height: 15px;
+}
+
+/* A pill: the site's glossy button in its platform's colours. */
+.fund {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  padding: 10px 20px 11px 16px;
+  border-radius: 999px;
+  border: 1px solid var(--ledge);
+  background: linear-gradient(var(--hi) 0%, var(--mid) 48%, var(--lo) 52%, color-mix(in srgb, var(--lo) 88%, #000) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 4px 0 var(--ledge), 0 8px 16px color-mix(in srgb, var(--mid) 30%, transparent);
+  color: #fff;
+  font: 800 15px/1.1 var(--font);
+  text-decoration: none;
+  white-space: nowrap;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+  transition: transform 260ms var(--spring), box-shadow var(--dur-press) var(--ease-out);
+}
+.fund .icon {
+  width: 20px;
+  height: 20px;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.25));
+}
+.fund:hover {
+  transform: translateY(-2px);
+}
+.fund:active {
+  transform: translateY(4px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 0 0 var(--ledge), 0 2px 6px color-mix(in srgb, var(--mid) 30%, transparent);
+  transition-duration: var(--dur-press);
+}
+.fund-gh {
+  --hi: #f6acd6;
+  --mid: #e2449f;
+  --lo: #d0338c;
+  --ledge: #9c2268;
+}
+.fund-kofi {
+  --hi: #ffb5b3;
+  --mid: #ff5e5b;
+  --lo: #f0433f;
+  --ledge: #b02b28;
+}
+.fund-bmc {
+  --hi: #fff4a6;
+  --mid: #ffdd00;
+  --lo: #f4cb00;
+  --ledge: #b28f00;
+  color: #0d0c22;
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+.fund-bmc .icon {
+  filter: none;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fund-gh:hover .icon,
+  .funds-tab:hover .icon {
+    animation: heartbeat 1s var(--ease-out) infinite;
+  }
+}
+@keyframes heartbeat {
+  0%, 30%, 60%, 100% {
+    transform: scale(1);
+  }
+  15% {
+    transform: scale(1.28);
+  }
+  45% {
+    transform: scale(1.16);
+  }
+}
+/* Where the gutter beside the page fits them, the pills stand there, always
+   in view, with no tab. */
+@media (min-width: 1420px) {
+  .funds,
+  .funds:hover {
+    left: 16px;
+    transform: none;
+    filter: none;
+  }
+  .funds-card {
+    overflow: visible;
+    background: none;
+    border-radius: 0;
+    box-shadow: none;
+  }
+  .funds-tab {
+    display: none;
+  }
+  .funds-list {
+    gap: 10px;
+    padding: 0;
+  }
+  .fund {
+    gap: 8px;
+    padding: 9px 16px 10px 12px;
+    font-size: 14px;
+  }
+  .fund .icon {
+    width: 18px;
+    height: 18px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .funds,
+  .fund {
+    transition: none;
   }
 }

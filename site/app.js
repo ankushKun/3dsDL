@@ -1211,7 +1211,7 @@
     });
 
     document.addEventListener("pointerover", function (event) {
-      var target = event.target.closest("[data-sound], .btn, .tabs a, .gh-link, .app-icon, .pick, .faq summary, .sbtn");
+      var target = event.target.closest("[data-sound], .btn, .tabs a, .gh-link, .fund, .app-icon, .pick, .faq summary, .sbtn");
       if (!target || target.contains(event.relatedTarget)) return;
       var now = Date.now();
       if (now - lastHover < 70) return;
@@ -1220,13 +1220,35 @@
     });
     // Buttons and tabs click; the menu, installer and FAQ play their own.
     document.addEventListener("click", function (event) {
-      var target = event.target.closest("[data-sound], .btn, .tabs a, .gh-link, .sbtn, .brand");
+      var target = event.target.closest("[data-sound], .btn, .tabs a, .gh-link, .fund, .sbtn, .brand");
       if (target) sfx.play(target.getAttribute("data-sound") || "click");
+    });
+  }
+
+  // The video's poster is a link to YouTube. A plain click swaps in the
+  // youtube-nocookie player instead and starts it, so nothing loads from
+  // YouTube before then; a middle or modified click still opens YouTube.
+  function setUpVideo() {
+    var tv = document.querySelector("[data-video]");
+    var poster = tv && tv.querySelector(".tv-poster");
+    if (!poster) return;
+    poster.addEventListener("click", function (event) {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      var frame = document.createElement("iframe");
+      frame.src = "https://www.youtube-nocookie.com/embed/" + tv.dataset.video + "?autoplay=1&rel=0&playsinline=1";
+      frame.title = "3dsDL video";
+      frame.allow = "autoplay; encrypted-media; picture-in-picture; fullscreen; web-share";
+      frame.allowFullscreen = true;
+      frame.referrerPolicy = "strict-origin-when-cross-origin";
+      tv.replaceChild(frame, poster);
+      frame.focus();
     });
   }
 
   showRelease();
   showDownloads();
+  setUpVideo();
   setUpCopyButtons();
   setUpSendTool();
   setUpScreenScale();
@@ -1255,4 +1277,16 @@
     if (buddy.classList.toggle("is-open")) window.track("buddy_opened", { app: "3dsFM" });
   });
   if (location.search.indexOf("buddy=open") !== -1) buddy.classList.add("is-open");
+})();
+
+// Support on the left edge. Wide screens show it outright; narrower ones
+// open it with its tab, which a tap also closes.
+(function () {
+  "use strict";
+  var funds = document.getElementById("funds");
+  if (!funds) return;
+  var tab = funds.querySelector(".funds-tab");
+  tab.addEventListener("click", function () {
+    tab.setAttribute("aria-expanded", funds.classList.toggle("is-open") ? "true" : "false");
+  });
 })();

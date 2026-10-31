@@ -7,7 +7,7 @@ The static site published at https://ankush.one/3dsDL/ by
   system software. It works without JavaScript except for the "send a link"
   QR tool. `app.js` adds the HOME Menu features, the status bar clock, the
   Notifications read state, the installer tabs, the device screens and their
-  boot animation, the synthesised menu sounds and the scroll reveals, and
+  boot animation, the synthesised menu sounds, the video player and the scroll reveals, and
   shows the latest release version and file sizes from the GitHub API.
 - The page before the retheme is tagged `site-classic`.
 - `qr/install-cia.svg`: the install QR code. It points at
@@ -51,6 +51,27 @@ install render's LED position (`.led`, in its 736 × 736 pixel space).
 `<name>-top.webp` (400 × 240) and `<name>-bottom.webp` (320 × 240) cut from
 one 400 × 480 screenshot at 0,0 and 40,240. Recapture them whenever the
 screens they show change.
+
+## Video
+
+The `#video` section shows [the YouTube video](https://www.youtube.com/watch?v=jloP4vZI0As).
+Until someone presses play it is a link to YouTube over `assets/video-640.webp` and
+`video-1280.webp`, copies of the video's `maxresdefault.jpg` thumbnail, so the page
+loads nothing from YouTube. `app.js` then swaps in the `youtube-nocookie.com` player.
+The play button carries the video's length and sits in the thumbnail's empty
+bottom-left corner. To change the video, update `data-video`, the link, the length
+(in the button and its `aria-label`) and both images:
+
+    cwebp -q 82 -m 6 -sharp_yuv maxresdefault.jpg -o site/assets/video-1280.webp
+    cwebp -q 82 -m 6 -sharp_yuv -resize 640 360 maxresdefault.jpg -o site/assets/video-640.webp
+
+## Support
+
+`#funds` pins GitHub Sponsors, Buy Me a Coffee and Ko-fi (the accounts in `.github/FUNDING.yml`)
+to the left edge, opposite the 3dsFM card, as glossy pills in each platform's colours. From
+1420 px the gutter beside the page fits them, so they stand there in view; narrower, they wait
+behind a Support tab that hover or a tap slides out, as the 3dsFM card does. The three marks are
+Simple Icons (CC0) symbols in the page's sprite.
 
 ## Loved on Reddit
 
