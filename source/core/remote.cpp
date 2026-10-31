@@ -80,6 +80,8 @@ const char *statusText(int status)
         return "Payload Too Large";
     case 500:
         return "Internal Server Error";
+    case 503:
+        return "Service Unavailable";
     case 507:
         return "Insufficient Storage";
     default:

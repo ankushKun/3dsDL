@@ -281,6 +281,14 @@ with a few hundred files.
     on before Download, after a short Checking wait that B stops.
 58k. Clear on Receive (X) empties the list of what is done while an upload
     still on its way keeps its row, and the files stay on the card.
+58l. The page as a file browser, on a computer and a phone: the sidebar
+    lists the Download Folder, 3ds, cias, Checkpoint and Files' favourites.
+    Select three files with Shift and Cmd clicks and with a box, Move To a
+    folder picked in the columns, and drag one onto a folder. Copy a folder
+    of a few hundred MiB onto one of the same name with Replace: it merges,
+    files only the old one had stay, and the console's Files shows the new
+    dates. Copy a file into its own folder (Cmd+C, Cmd+V): "name (1)". On a
+    phone a long press starts picking, and the drawer opens the places.
 
 ### Saves, tickets and sounds
 

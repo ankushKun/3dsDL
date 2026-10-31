@@ -76,8 +76,18 @@ struct ConsoleStatus {
 
 // How the page reaches the SD card. Without a root, the file API answers
 // 404 and only links can be sent.
+// A folder or file the page lists beside the SD card itself.
+struct Place {
+    std::string name;
+    std::string path; // on the card: "sdmc:/3ds", without a trailing '/'
+};
+
 struct FileSharing {
     std::string root; // "sdmc:"
+    // Folders the page offers in its sidebar, and Files' favourites. Those
+    // not there when the page asks are left out.
+    std::vector<Place> places;
+    std::vector<Place> favorites;
     // Whether the device at an address may use the files. When ask is set
     // and the device is unknown, the console asks and the answer is Pending
     // until it is given; without ask an unknown device is Unknown. device

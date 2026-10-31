@@ -461,6 +461,67 @@ TEST("remote server: files go up, come back, move and go away")
     }
 }
 
+TEST("remote server: copies and moves ask before taking a name, and folders merge")
+{
+    TempRoot root;
+    CHECK(fs::makeDirectories(root.path + "/a/app/"));
+    CHECK(fs::makeDirectories(root.path + "/b/app/"));
+    CHECK(fs::writeFile(root.path + "/a/x.txt", "new x"));
+    CHECK(fs::writeFile(root.path + "/a/app/app.3dsx", "new app"));
+    CHECK(fs::writeFile(root.path + "/b/x.txt", "old x"));
+    CHECK(fs::writeFile(root.path + "/b/app/app.3dsx", "old app"));
+    CHECK(fs::writeFile(root.path + "/b/app/config.ini", "kept"));
+    net::FileSharing sharing;
+    sharing.root = root.path;
+    sharing.places = {{"Downloads", root.path + "/a"}, {"gone", root.path + "/gone"}};
+    sharing.favorites = {{"x.txt", root.path + "/b/x.txt"}};
+    net::Receiver receiver;
+    std::string error;
+    CHECK(receiver.open(0, 0, 0, error));
+    receiver.shareFiles(sharing);
+    Serving serving(receiver);
+    const unsigned short port = receiver.webPort();
+
+    // Only what is there is offered.
+    CHECK(bodyOf(get(port, "/api/places")) ==
+          "{\"places\":[{\"name\":\"Downloads\",\"path\":\"/a\",\"dir\":true}],"
+          "\"favorites\":[{\"name\":\"x.txt\",\"path\":\"/b/x.txt\",\"dir\":false}]}");
+
+    // A taken name is refused unless the page says what to do.
+    CHECK(startsWith(post(port, "/api/copy", "from=%2Fa%2Fx.txt&to=%2Fb%2Fx.txt"),
+                     "HTTP/1.1 409"));
+    std::string response =
+        post(port, "/api/copy", "from=%2Fa%2Fx.txt&to=%2Fb%2Fx.txt&clash=keep");
+    CHECK(bodyOf(response) == "{\"path\":\"/b/x (1).txt\"}");
+    std::string stored;
+    CHECK(fs::readFile(root.path + "/b/x (1).txt", stored) && stored == "new x");
+    // Copied into its own folder, it keeps both too.
+    CHECK(bodyOf(post(port, "/api/copy", "from=%2Fa%2Fx.txt&to=%2Fa%2Fx.txt&clash=keep")) ==
+          "{\"path\":\"/a/x (1).txt\"}");
+    CHECK(startsWith(post(port, "/api/copy", "from=%2Fa%2Fx.txt&to=%2Fa%2Fx.txt&clash=replace"),
+                     "HTTP/1.1 409"));
+    CHECK(fs::readFile(root.path + "/a/x.txt", stored) && stored == "new x");
+
+    // Replacing a folder merges into it.
+    CHECK(bodyOf(post(port, "/api/copy", "from=%2Fa%2Fapp&to=%2Fb%2Fapp&clash=replace")) ==
+          "{\"path\":\"/b/app\"}");
+    CHECK(fs::readFile(root.path + "/b/app/app.3dsx", stored) && stored == "new app");
+    CHECK(fs::readFile(root.path + "/b/app/config.ini", stored) && stored == "kept");
+    CHECK(fs::fileExists(root.path + "/a/app/app.3dsx"));
+
+    // Moved over a file, it replaces it and is gone from where it was.
+    CHECK(bodyOf(post(port, "/api/move", "from=%2Fa%2Fx.txt&to=%2Fb%2Fx.txt&clash=replace")) ==
+          "{\"path\":\"/b/x.txt\"}");
+    CHECK(fs::readFile(root.path + "/b/x.txt", stored) && stored == "new x");
+    CHECK(!fs::fileExists(root.path + "/a/x.txt"));
+    // Moving onto itself changes nothing; into itself is refused.
+    CHECK(bodyOf(post(port, "/api/move", "from=%2Fb%2Fx.txt&to=%2Fb%2Fx.txt&clash=replace")) ==
+          "{\"path\":\"/b/x.txt\"}");
+    CHECK(fs::fileExists(root.path + "/b/x.txt"));
+    CHECK(startsWith(post(port, "/api/move", "from=%2Fb&to=%2Fb%2Fapp%2Fb&clash=keep"),
+                     "HTTP/1.1 409"));
+}
+
 TEST("remote server: uploads wait in the staging folder, then take their place")
 {
     TempRoot root;

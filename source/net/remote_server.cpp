@@ -3,9 +3,12 @@
 #include "file_ops.hpp"
 #include "file_types.hpp"
 #include "fs_util.hpp"
+#include "naming.hpp"
 #include "remote.hpp"
 #include "socket_wait.hpp"
+#include "text.hpp"
 #include "title_meta.hpp"
+#include "units.hpp"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -333,6 +336,139 @@ std::string folderOf(const std::string &path)
 bool isRoot(const FileSharing &sharing, const std::string &path)
 {
     return path == sharing.root + "/";
+}
+
+// The page's path for one on the card: "sdmc:/a/b" -> "/a/b".
+std::string webPathOf(const FileSharing &sharing, const std::string &local)
+{
+    std::string web = local.substr(sharing.root.size());
+    while (web.size() > 1 && web.back() == '/') {
+        web.pop_back();
+    }
+    return web.empty() ? "/" : web;
+}
+
+// The sidebar's folders and the favourites that are there now.
+void sendPlaces(int client, const FileSharing &sharing)
+{
+    const auto list = [&](const std::vector<Place> &places) {
+        std::string json;
+        for (const Place &place : places) {
+            if (place.path.compare(0, sharing.root.size(), sharing.root) != 0 ||
+                !fileops::exists(place.path)) {
+                continue;
+            }
+            json += std::string(json.empty() ? "" : ",") +
+                    "{\"name\":" + remote::jsonString(place.name) +
+                    ",\"path\":" + remote::jsonString(webPathOf(sharing, place.path)) +
+                    ",\"dir\":" + (fileops::isFolder(place.path) ? "true" : "false") +
+                    "}";
+        }
+        return "[" + json + "]";
+    };
+    sendJson(client, "{\"places\":" + list(sharing.places) +
+                         ",\"favorites\":" + list(sharing.favorites) + "}");
+}
+
+// Moves or copies the entry at local to destination. A name already taken
+// there is refused, unless clash is "keep" (it takes the next free name)
+// or "replace" (what is there goes, and a folder meeting a folder is
+// merged into it). Answers with where it ended up.
+void transferEntry(int client, const FileSharing &sharing, const std::string &local,
+                   std::string destination, const std::string &clash, bool moving)
+{
+    const std::string name = fileops::name(local);
+    if (isRoot(sharing, local) || isRoot(sharing, destination)) {
+        sendAll(client, remote::jsonError(400, moving ? "The SD card itself cannot move."
+                                                      : "The SD card itself cannot be copied."));
+        return;
+    }
+    if (!fileops::exists(local)) {
+        sendAll(client, remote::jsonError(404, name + " is not there any more."));
+        return;
+    }
+    const std::string folder = folderOf(destination);
+    if (!fs::directoryExists(folder)) {
+        sendAll(client, remote::jsonError(404, "That folder does not exist."));
+        return;
+    }
+    const bool isFolder = fileops::isFolder(local);
+    if (isFolder && fileops::isInside(destination, local)) {
+        sendAll(client, remote::jsonError(409, name + " cannot go inside itself."));
+        return;
+    }
+    // FAT ignores case, so the same entry may be named either way.
+    const bool itself = text::lower(destination) == text::lower(local);
+    if (moving && itself && clash != "") {
+        sendJson(client, "{\"path\":" + remote::jsonString(webPathOf(sharing, local)) + "}");
+        return;
+    }
+    StopWith observer(sharing);
+    bool merge = false;
+    if (fileops::exists(destination)) {
+        if (clash == "keep") {
+            destination = naming::unusedPath(folder.back() == '/' ? folder : folder + "/",
+                                             fileops::name(destination),
+                                             [](const std::string &path) {
+                                                 return fileops::exists(path);
+                                             });
+            if (destination.empty()) {
+                sendAll(client, remote::jsonError(409, "No free name was found for " +
+                                                           name + "."));
+                return;
+            }
+        } else if (clash == "replace" && !itself) {
+            merge = isFolder && fileops::isFolder(destination);
+            uint64_t removed = 0;
+            const fileops::Result cleared =
+                merge ? fileops::Result()
+                      : fileops::remove(destination, observer, removed, 0);
+            if (cleared.status != fileops::Status::Ok) {
+                changed(sharing, destination);
+                sendAll(client, remote::jsonError(500, cleared.message));
+                return;
+            }
+        } else {
+            sendAll(client, remote::jsonError(409, fileops::name(destination) +
+                                                       " is already there."));
+            return;
+        }
+    }
+    uint64_t bytes = 0;
+    if (!moving) {
+        bytes = fileops::measure(local).bytes;
+        const int64_t free = sharing.freeSpace ? sharing.freeSpace() : -1;
+        if (free >= 0 && bytes > static_cast<uint64_t>(free)) {
+            sendAll(client, remote::jsonError(507, "Copying needs " + units::bytes(bytes) +
+                                                       " and " +
+                                                       units::bytes(static_cast<uint64_t>(free)) +
+                                                       " is free."));
+            return;
+        }
+    }
+    fileops::Result result;
+    uint64_t done = 0;
+    if (merge) {
+        result = fileops::merge(local, destination, moving, observer, done, bytes);
+    } else if (moving) {
+        if (!fileops::move(local, destination, result.message)) {
+            result.status = fileops::Status::Failed;
+        }
+    } else {
+        result = fileops::copy(local, destination, observer, done, bytes);
+    }
+    if (moving) {
+        changed(sharing, local);
+    }
+    changed(sharing, destination);
+    if (result.status != fileops::Status::Ok) {
+        sendAll(client, remote::jsonError(result.status == fileops::Status::Cancelled ? 503 : 409,
+                                          result.status == fileops::Status::Cancelled
+                                              ? "Stopped on the 3DS."
+                                              : result.message));
+        return;
+    }
+    sendJson(client, "{\"path\":" + remote::jsonString(webPathOf(sharing, destination)) + "}");
 }
 
 // Reads the rest of a small body into request.body.
@@ -908,6 +1044,10 @@ bool serveApi(int client, const FileSharing &sharing, const std::string &from,
         }
         return false;
     }
+    if (route == "/api/places" && method == "GET") {
+        sendPlaces(client, sharing);
+        return false;
+    }
     if ((route == "/api/meta" || route == "/api/icon") && method == "GET") {
         if (mapped(remote::formValue(request.query, "path"), local)) {
             sendTitle(client, sharing, local, route == "/api/icon");
@@ -967,26 +1107,12 @@ bool serveApi(int client, const FileSharing &sharing, const std::string &from,
         }
         return false;
     }
-    if (route == "/api/move") {
+    if (route == "/api/move" || route == "/api/copy") {
         std::string destination;
-        if (!mapped(remote::formValue(form, "from"), local) ||
-            !mapped(remote::formValue(form, "to"), destination)) {
-            return false;
-        }
-        std::string error;
-        if (isRoot(sharing, local) || isRoot(sharing, destination)) {
-            sendAll(client, remote::jsonError(400, "The SD card itself cannot move."));
-        } else if (!fileops::exists(local)) {
-            sendAll(client, remote::jsonError(404, fileops::name(local) +
-                                                       " is not there any more."));
-        } else if (!fs::directoryExists(folderOf(destination))) {
-            sendAll(client, remote::jsonError(404, "That folder does not exist."));
-        } else if (!fileops::move(local, destination, error)) {
-            sendAll(client, remote::jsonError(409, error));
-        } else {
-            changed(sharing, local);
-            changed(sharing, destination);
-            sendJson(client, "{}");
+        if (mapped(remote::formValue(form, "from"), local) &&
+            mapped(remote::formValue(form, "to"), destination)) {
+            transferEntry(client, sharing, local, destination,
+                          remote::formValue(form, "clash"), route == "/api/move");
         }
         return false;
     }

@@ -16,7 +16,7 @@ qrencode -t ansiutf8 "https://example.com/some-homebrew.3dsx"
 
 **Add to Queue** on the confirm screen saves a link for later. From the scanner the camera comes straight back, so a page of codes goes quickly. **Queue** on the home screen downloads them all with **Download All**, keeping both files on a name clash and asking about CIAs once.
 
-**Receive** listens for links and files while it's open. Scan its QR code with a phone on the same Wi-Fi, or type the address it shows into a browser. Most computers and iPhones can also open `http://3ds.local/` (`3ds-2.local` if another console already uses the name); some Android phones can't, which is why the QR code uses the address. Paste links into the page and press **Send to 3DS**. FBI's `servefiles.py`, `sendurls.py` and Boop take the same address, as they did with FBI. CIAs they send install without a copy being kept, or download instead if you choose.
+**Receive** listens for links and files while it's open. Scan its QR code with a phone on the same Wi-Fi, or type the address it shows into a browser. Most computers and iPhones can also open `http://3ds.local/` (`3ds-2.local` if another console already uses the name); some Android phones can't, which is why the QR code uses the address. Paste links into the page's **Send Links** and press **Send**. FBI's `servefiles.py`, `sendurls.py` and Boop take the same address, as they did with FBI. CIAs they send install without a copy being kept, or download instead if you choose.
 
 A website can send a link as well, with `http://3ds.local/send?links=<link>` (the link URL-encoded), at most 20 links at once. Before it asks, the console checks where each link leads once its redirects are followed, and names that host. A link never leads back to the console, and one from another site never into your home network. Links from anywhere but 3dsDL's own page start on **Cancel**, since a site can send them without being asked. After you cancel a device's links, its next ones offer **Don't Allow**, which turns that device's links away until you leave Receive (its use of the files is asked about separately). Three more fields say where links go:
 
@@ -28,14 +28,16 @@ A file that ends up coming from another site than the one its link was checked t
 
 Everything that comes in or goes out stays listed on the touch screen until 3dsDL closes, newest first: each file, each folder dropped on the page as one row, and each link, with how it went. Open a row to see where it was saved and who sent it, to install a CIA, or to show it in Files.
 
-The page's **Files** tab is a file manager for the SD card, with no FTP app needed. The first time a device opens it, the console asks whether to allow that device, and the answer lasts until you leave Receive. From the page you can:
+The page is also a file browser for the SD card, with no FTP app needed: the SD card's usual folders and Files' favourites on the left, the folder in the middle, and what is selected on the right (on a phone the left side slides in, and a bar at the bottom holds the actions). The first time a device opens a folder, the console asks whether to allow that device, and the answer lasts until you leave Receive. From the page you can:
 
-- upload files or whole folders with the buttons or by dropping them on the page, up to the 4 GiB a FAT32 card allows, with progress, speed and cancel for each file;
+- upload files or whole folders with **Upload** or by dropping them on the folder or on a folder in the sidebar, up to the 4 GiB a FAT32 card allows, with progress, speed and cancel for each file under **Transfers**;
 - download files, open pictures and text in the browser, and edit text files in place;
-- make folders, rename, move and delete, one entry or several at once;
+- select several entries with Shift and Cmd or Ctrl clicks, a box drawn with the mouse, or a long press on a phone;
+- move or copy them with **Move To** and **Copy To**, which pick the folder in columns, by dragging them onto a folder (hold Option, or Ctrl on Windows, to copy), or with cut, copy and paste on the keyboard. When names are already taken the page asks once: **Skip**, **Keep Both**, or **Replace**, which merges a folder into one of the same name;
+- make folders, rename and delete, one entry or several at once;
 - send CIAs to the console to install. With **Offer to install CIAs** ticked, the console asks once a batch of uploads finishes.
 
-The page follows the console: a status at the top says when it is waiting for you to choose on the 3DS, installing or downloading, and how that ended. Tap a file for its details, with the real icon, title, title ID and version for CIAs and homebrew. Uploads sit at the top of the list, with each file shown as soon as it arrives. There is a filter, hidden files, select all, a picture viewer, keyboard shortcuts on a computer, and a warning before you change `boot.firm`, `luma` or `Nintendo 3DS`.
+The page follows the console: the status under 3dsDL's name says when it is waiting for you to choose on the 3DS, installing or downloading, and how that ended. A CIA or homebrew shows its real icon, title, title ID and version. There are icon and list views, sorting by name, kind, size or date, search, hidden files, a picture viewer, keyboard shortcuts on a computer, and a warning before you change `boot.firm`, `luma` or `Nintendo 3DS`.
 
 One transfer runs at a time, and the console shows it on the top screen. While the page is sending, reading or comparing files the console stays out of Sleep Mode, also with the lid closed and between the files of a batch, and sleeps half a minute after the last request. Uploads go to a hidden `.3dsdl-upload.part` file and only take their real name once every byte has arrived. From a computer, `curl` works too:
 

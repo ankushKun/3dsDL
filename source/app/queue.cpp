@@ -1095,6 +1095,27 @@ void App::receiveScreen()
     }
     net::FileSharing sharing;
     sharing.root = "sdmc:";
+    // The page's sidebar: the Download Folder, the usual homebrew folders
+    // and Files' favourites, each once.
+    std::set<std::string> listed;
+    const auto place = [&](std::vector<net::Place> &into, std::string path) {
+        while (path.size() > 6 && path.back() == '/') {
+            path.pop_back();
+        }
+        if (path != "sdmc:/" && listed.insert(text::lower(path)).second) {
+            into.push_back({fileops::name(path), path});
+        }
+    };
+    place(sharing.places, settings_.destination);
+    if (!sharing.places.empty()) {
+        sharing.places.back().name = "Downloads";
+    }
+    for (const char *folder : {"sdmc:/3ds", "sdmc:/cias", "sdmc:/3ds/Checkpoint"}) {
+        place(sharing.places, folder);
+    }
+    for (const std::string &favorite : settings_.favorites) {
+        place(sharing.favorites, favorite);
+    }
     job.self = localAddress();
     sharing.access = [&job](const std::string &from, const std::string &device,
                             bool ask) { return job.access(from, device, ask); };
@@ -1220,6 +1241,11 @@ void App::receiveScreen()
         }
         for (const std::string &path : changes) {
             sdChanged(path);
+            // A folder the page merged into may hold files written over at
+            // the same size.
+            if (fileops::isFolder(path)) {
+                fileIndex_.rewritten(path);
+            }
         }
         receiveLog_.settle(now);
     };
