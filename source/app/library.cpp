@@ -769,8 +769,34 @@ bool installTicketData(const std::string &data, std::string &error)
 
 } // namespace
 
-bool deleteTicket(uint64_t titleId, std::string &error)
+TicketFacts ticketFacts(uint64_t titleId)
 {
+    TicketFacts facts;
+    AM_TicketInfo info {};
+    u32 count = 0;
+    if (R_SUCCEEDED(AMNET_GetTicketInfos(&count, &info, 0, 1, titleId)) &&
+        count > 0) {
+        facts.known = true;
+        facts.ticketId = info.ticketId;
+        facts.version = info.titleVersion;
+    }
+    std::vector<AM_TicketInfo> personal(512);
+    count = 0;
+    if (R_SUCCEEDED(AM_GetPersonalizedTicketInfos(
+            &count, personal.data(), static_cast<u32>(personal.size())))) {
+        for (u32 index = 0; index < count && index < personal.size(); ++index) {
+            facts.personal = facts.personal || personal[index].titleId == titleId;
+        }
+    }
+    return facts;
+}
+
+bool deleteTicket(uint64_t titleId, std::string &error, bool *unsaved,
+                  bool withoutBackup)
+{
+    if (unsaved != nullptr) {
+        *unsaved = false;
+    }
     if (!titles::isShown(titleId)) {
         error = "System tickets are never removed.";
         return false;
@@ -782,10 +808,19 @@ bool deleteTicket(uint64_t titleId, std::string &error)
     // Saved first, so a deleted ticket can always be put back. No copy, no
     // delete.
     std::string backup = "nothing (test fault)";
-    if (!fault("skip-backup") &&
-        !exportTicket(titleId, DeletedTicketsFolder, backup, error)) {
+    if (withoutBackup) {
+        const TicketFacts facts = ticketFacts(titleId);
+        backup = std::string("ticket ") +
+                 (facts.known ? std::to_string(facts.ticketId) : "unknown") +
+                 ", version " + std::to_string(facts.version) +
+                 (facts.personal ? ", bought on this console" : ", not bought here");
+    } else if (!fault("skip-backup") &&
+               !exportTicket(titleId, DeletedTicketsFolder, backup, error)) {
         error = "The ticket was kept, as it could not be saved first. " + error;
         logTickets("kept " + cia::titleIdText(titleId) + ": no backup");
+        if (unsaved != nullptr) {
+            *unsaved = true;
+        }
         return false;
     }
     const ::Result code = AM_DeleteTicket(titleId);
@@ -793,7 +828,8 @@ bool deleteTicket(uint64_t titleId, std::string &error)
         error = "The ticket could not be deleted. " + installer::describe(code);
         return false;
     }
-    logTickets("deleted " + cia::titleIdText(titleId) + ", saved as " + backup);
+    logTickets("deleted " + cia::titleIdText(titleId) +
+               (withoutBackup ? " without a backup: " : ", saved as ") + backup);
     return true;
 }
 

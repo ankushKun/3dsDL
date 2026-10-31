@@ -64,3 +64,15 @@ TEST("saves: exclusions, backup names and host files")
     CHECK_EQ(names[0], std::string("20261019-143005"));
     CHECK_EQ(names[2], std::string("20250101-000000"));
 }
+
+TEST("saves: a Checkpoint folder names the title it belongs to")
+{
+    const uint64_t fm = 0x0004000003D5F100ULL;
+    CHECK_EQ(saves::nameFromFolder(fm, "0x3D5F1 3dsFM"), std::string("3dsFM"));
+    CHECK_EQ(saves::nameFromFolder(fm, "0x3d5f1 3dsFM "), std::string("3dsFM"));
+    CHECK_EQ(saves::nameFromFolder(fm, saves::titleFolder(fm, "3dsFM")),
+             std::string("3dsFM"));
+    CHECK_EQ(saves::nameFromFolder(fm, "0x3D5F2 Other"), std::string());
+    CHECK_EQ(saves::nameFromFolder(fm, "0x3D5F1 "), std::string());
+    CHECK_EQ(saves::nameFromFolder(fm, "0x3D5F1"), std::string());
+}

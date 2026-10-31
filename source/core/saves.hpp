@@ -30,6 +30,10 @@ std::string sanitize(const std::string &name);
 // and so does this.
 std::string titleFolder(uint64_t titleId, const std::string &englishShortName);
 
+// The name a Checkpoint backup folder ("0x3D5F1 3dsFM") gives the title it
+// belongs to, when it is titleId's (by unique ID); "" otherwise.
+std::string nameFromFolder(uint64_t titleId, const std::string &folder);
+
 // The extra data a title keeps: its unique ID, or another one for the few
 // games that share (Checkpoint's table).
 uint32_t extDataId(uint64_t titleId);

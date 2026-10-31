@@ -198,6 +198,16 @@ private:
     void extraDataScreen();
     void ticketsScreen();
     void deleteUnusedTickets();
+    // A name for software that may be gone: installed, remembered from when
+    // it was (knownNames_), or from a Checkpoint backup folder in folders;
+    // "" when none is known.
+    std::string softwareName(uint64_t titleId, const titles::Index &index,
+                             const std::vector<std::string> &folders) const;
+    // Asks whether to delete tickets that cannot be saved first, showing
+    // what each belonged to, whether it was bought on this console and a CIA
+    // that would bring it back. True for yes.
+    bool confirmUnsavedTickets(const std::vector<uint64_t> &tickets,
+                               const std::string &why);
     void cleanUpScreen();
     void importSeeds();
 
@@ -291,6 +301,9 @@ private:
 
     Settings settings_;
     std::vector<HistoryEntry> history_;
+    // Names of software once seen installed, so what is left behind can
+    // still be named.
+    titles::Names knownNames_;
     int homeSelection_ = 2; // Scan QR Code
     std::string filesFolder_;
     // An entry for Files to highlight in filesFolder_ once it is read.

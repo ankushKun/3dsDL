@@ -3,6 +3,7 @@
 #include "text.hpp"
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstring>
 #include <set>
 
@@ -250,6 +251,67 @@ std::vector<SeedEntry> seedsFor(const std::vector<SeedEntry> &entries,
         }
     }
     return matched;
+}
+
+Names parseNames(const std::string &text)
+{
+    Names names;
+    size_t start = 0;
+    while (start < text.size()) {
+        size_t end = text.find('\n', start);
+        if (end == std::string::npos) {
+            end = text.size();
+        }
+        const std::string line = text.substr(start, end - start);
+        start = end + 1;
+        const size_t space = line.find(' ');
+        if (space != 16) {
+            continue;
+        }
+        char *stop = nullptr;
+        const std::string hex = line.substr(0, 16);
+        const unsigned long long id = std::strtoull(hex.c_str(), &stop, 16);
+        const std::string name = text::trim(line.substr(space + 1));
+        if (stop == hex.c_str() + 16 && id != 0 && !name.empty()) {
+            names[id] = name;
+        }
+    }
+    return names;
+}
+
+std::string serializeNames(const Names &names)
+{
+    std::string text;
+    for (const auto &entry : names) {
+        text += cia::titleIdText(entry.first) + " " + text::singleLine(entry.second) + "\n";
+    }
+    return text;
+}
+
+bool rememberNames(Names &names, const std::vector<Title> &titles)
+{
+    bool changed = false;
+    for (const Title &title : titles) {
+        if (title.name.empty()) {
+            continue;
+        }
+        std::string &kept = names[title.id];
+        if (kept != title.name) {
+            kept = title.name;
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+std::string rememberedName(uint64_t titleId, const Names &names)
+{
+    const auto own = names.find(titleId);
+    if (own != names.end()) {
+        return own->second;
+    }
+    const auto game = names.find(cia::baseTitle(titleId));
+    return game != names.end() ? game->second : "";
 }
 
 } // namespace titles

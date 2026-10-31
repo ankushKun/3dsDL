@@ -159,7 +159,8 @@ HistoryEntry newEntry(const std::string &address, const std::string &folder,
 } // namespace
 
 App::App()
-    : settings_(storage::loadSettings()), history_(storage::loadHistory())
+    : settings_(storage::loadSettings()), history_(storage::loadHistory()),
+      knownNames_(storage::loadNames())
 {
     sound::setEnabled(settings_.sounds);
     // Interrupted downloads from before names were kept: their resume file

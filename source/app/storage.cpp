@@ -18,6 +18,11 @@ std::string historyPath()
     return std::string(DataFolder) + "history.txt";
 }
 
+std::string namesPath()
+{
+    return std::string(DataFolder) + "names.txt";
+}
+
 } // namespace
 
 Settings loadSettings()
@@ -63,6 +68,19 @@ bool saveHistory(const std::vector<HistoryEntry> &entries)
 {
     return fs::makeDirectories(DataFolder) &&
            fs::writeFile(historyPath(), serializeHistory(entries));
+}
+
+titles::Names loadNames()
+{
+    std::string contents;
+    return fs::readFile(namesPath(), contents) ? titles::parseNames(contents)
+                                               : titles::Names();
+}
+
+bool saveNames(const titles::Names &names)
+{
+    return fs::makeDirectories(DataFolder) &&
+           fs::writeFile(namesPath(), titles::serializeNames(names));
 }
 
 } // namespace storage

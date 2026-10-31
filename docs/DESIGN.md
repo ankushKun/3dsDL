@@ -178,6 +178,7 @@ strip for a red button and a 30 px dark Cancel strip.
 | Delete | what goes and how big it is | destructive dialog |
 | History | the highlighted download in full | rows with Installed, Resume, Saved, Failed badges |
 | Receive | QR code for the page, the address in large type and http://3ds.local under it; while a file is on its way, its progress as Downloading shows it, with the address at the end of the dotted line | what came in and went out since 3dsDL started, newest first: a bar on what is on its way, the size of what arrived, Installed, Failed, Sent, Queued and Stopped badges, Back |
+| Tickets without a backup | for one: its software (installed, remembered from when it was, from a Checkpoint folder or a CIA on the card), Title ID, bought here, issued for, a CIA that restores it, why no backup; for several: each one's name and whether it was bought here or has a CIA | destructive dialog: Delete Anyway / Keep, starting on Keep |
 | Received row | the row's name and facts | Install, Install and Delete File, Show in Files |
 | Sent links | names and the host each link leads to after its redirects, who sent them, where they go | dialog: Download / Add to Queue / Cancel, starting on Cancel unless 3dsDL's own page sent them; Don't Allow in place of Add to Queue once a device's links were cancelled |
 | Sent replace | the file, its host, the sender, the app, its folder and the name the new one was kept as | dialog: Keep Both / Replace, starting on Keep Both; only for the same app |

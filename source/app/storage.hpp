@@ -1,6 +1,7 @@
 #pragma once
 
 #include "records.hpp"
+#include "titles.hpp"
 
 #include <string>
 #include <vector>
@@ -17,5 +18,9 @@ bool saveSettings(const Settings &settings);
 
 std::vector<HistoryEntry> loadHistory();
 bool saveHistory(const std::vector<HistoryEntry> &entries);
+
+// Names of software seen installed (titles::Names), in names.txt.
+titles::Names loadNames();
+bool saveNames(const titles::Names &names);
 
 } // namespace storage

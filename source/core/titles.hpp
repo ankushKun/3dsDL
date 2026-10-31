@@ -47,6 +47,18 @@ Index indexOf(const std::vector<Title> &all);
 std::string displayName(const Title &title, const Index &index);
 std::string displayName(uint64_t titleId, const Index &index);
 
+// Names of software seen installed, kept on the SD card, so a ticket or
+// extra data left behind once the software is gone can still be named.
+// The file holds a line "0004000003D5F100 3dsFM" for each.
+using Names = std::map<uint64_t, std::string>;
+Names parseNames(const std::string &text);
+std::string serializeNames(const Names &names);
+// Adds the names titles have; true when any was new or changed.
+bool rememberNames(Names &names, const std::vector<Title> &titles);
+// The remembered name for titleId, or for an update or DLC its game's; ""
+// when there is none.
+std::string rememberedName(uint64_t titleId, const Names &names);
+
 // Sorted by display name, ignoring case, then by Title ID.
 void sortByName(std::vector<const Title *> &list, const Index &index);
 // The title lists' orders: Name (A to Z) or Size (largest first), the way

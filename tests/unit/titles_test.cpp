@@ -204,3 +204,36 @@ TEST("titles: reads seeddb.bin and keeps seeds for installed software")
     CHECK(titles::parseSeedDb(empty, entries, error));
     CHECK(entries.empty());
 }
+
+TEST("titles: names of software once installed are remembered")
+{
+    titles::Names names;
+    std::vector<titles::Title> installed(3);
+    installed[0].id = 0x0004000003D5F100ULL;
+    installed[0].name = "3dsFM";
+    installed[1].id = 0x0004000E03D5F100ULL; // its update: no name of its own
+    installed[2].id = 0x000400000F5D2300ULL;
+    installed[2].name = "3dsDL";
+    CHECK(titles::rememberNames(names, installed));
+    CHECK(!titles::rememberNames(names, installed));
+    CHECK_EQ(names.size(), static_cast<size_t>(2));
+    // The update and a DLC are named after their game.
+    CHECK_EQ(titles::rememberedName(0x0004000E03D5F100ULL, names), std::string("3dsFM"));
+    CHECK_EQ(titles::rememberedName(0x0004008C03D5F100ULL, names), std::string("3dsFM"));
+    CHECK_EQ(titles::rememberedName(0x0004000000055D00ULL, names), std::string());
+
+    const titles::Names back = titles::parseNames(titles::serializeNames(names));
+    CHECK(back == names);
+    CHECK_EQ(titles::serializeNames(names).substr(0, 23),
+             std::string("0004000003D5F100 3dsFM\n"));
+    // Damaged lines are skipped, the rest kept.
+    const titles::Names read = titles::parseNames(
+        "garbage\n0004000003D5F10 short\n000400000F5D2300   3dsDL  \n"
+        "zz04000003D5F100 bad\n0000000000000000 zero\n0004000003D5F100 \n");
+    CHECK_EQ(read.size(), static_cast<size_t>(1));
+    CHECK_EQ(read.at(0x000400000F5D2300ULL), std::string("3dsDL"));
+    // A new name replaces an old one.
+    installed[0].name = "3dsFM 2";
+    CHECK(titles::rememberNames(names, installed));
+    CHECK_EQ(titles::rememberedName(0x0004000003D5F100ULL, names), std::string("3dsFM 2"));
+}

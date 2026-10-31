@@ -30,6 +30,16 @@ std::string titleFolder(uint64_t titleId, const std::string &englishShortName)
     return unique + sanitize(englishShortName);
 }
 
+std::string nameFromFolder(uint64_t titleId, const std::string &folder)
+{
+    const std::string prefix = titleFolder(titleId, "");
+    if (folder.size() <= prefix.size() ||
+        text::lower(folder.substr(0, prefix.size())) != text::lower(prefix)) {
+        return "";
+    }
+    return text::trim(folder.substr(prefix.size()));
+}
+
 uint32_t extDataId(uint64_t titleId)
 {
     const uint32_t low = static_cast<uint32_t>(titleId);

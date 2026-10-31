@@ -200,7 +200,10 @@ with a few hundred files.
     games that are no longer installed; Delete removes one and the game
     recreates it on its next start.
 50. Tickets marks tickets of uninstalled software as Unused, and Delete Unused
-    removes only those.
+    removes only those. A homebrew CIA's leftover ticket, which the console
+    will not export, is named (installed once, a Checkpoint folder or its
+    CIA on the card) and asked about with Delete Anyway / Keep; Keep leaves
+    it, Delete Anyway logs it in tickets/deleted/log.txt.
 51. Interrupt a CIA install (cancel it, or pull the power in a test), then
     Clean Up shows an unfinished install; Remove Unfinished Installs clears
     it and the CIA installs again.
