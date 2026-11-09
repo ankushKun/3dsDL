@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 // What every request 3dsDL makes sends and trusts.
 namespace http {
@@ -46,6 +47,15 @@ void drawLabelledPanel(float y, float height, const std::string &label,
 
 // The title's name from its icon data, or its title ID when it has none.
 std::string ciaName(const cia::Info &info);
+// A CIA that a batch of installs could not put in, and why.
+struct NotInstalled {
+    std::string name;
+    std::string why;
+};
+// A batch's summary on the top screen: each CIA that did not go in with
+// why, as many as fit, then how many more.
+void drawNotInstalled(const std::string &title,
+                      const std::vector<NotInstalled> &failed);
 // Publisher, kind, version, size and the installed version, if any.
 void addCiaParagraphs(ui::Dialog &dialog, const cia::Info &info);
 

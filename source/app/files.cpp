@@ -2229,36 +2229,48 @@ void App::installCias(const std::vector<std::string> &paths, bool deleteAfter)
         return;
     }
 
+    // Said once here rather than once for every CIA below.
+    if (!installer::available()) {
+        ui::message("Cannot install", installer::unavailableReason(),
+                    ui::Tone::Error);
+        return;
+    }
     size_t installed = 0;
     size_t kept = 0; // the same version was there and stayed
-    std::vector<std::string> failed;
+    // A failure does not stop the rest: each is named once they are done,
+    // so a long batch is not left waiting for OK.
+    std::vector<screens::NotInstalled> failed;
     for (const std::string &path : paths) {
         if (!ui::keepRunning()) {
             return;
         }
         cia::Info info;
-        std::string error;
+        std::string why;
         bool already = false;
-        if (readCia(path, info, error) &&
-            installCia(path, info, deleteAfter, "", true, &already)) {
+        if (readCia(path, info, why) &&
+            installCia(path, info, deleteAfter, "", InstallDialogs::None,
+                       &already, &why)) {
             ++(already ? kept : installed);
         } else {
-            failed.push_back(basename(path));
+            failed.push_back({basename(path), why});
         }
     }
-    std::string list;
-    for (const std::string &name : failed) {
-        list += (list.empty() ? "" : ", ") + name;
+    const std::string summary =
+        "Installed " + std::to_string(installed) + " of " +
+        plural(paths.size(), "CIA") + "." +
+        (kept > 0 ? " " + std::to_string(kept) + (kept == 1 ? " was" : " were") +
+                        " already installed."
+                  : "");
+    if (failed.empty()) {
+        ui::message("All installed", summary, ui::Tone::Success);
+        return;
     }
-    ui::message(failed.empty() ? "All installed" : "Some were not installed",
-                "Installed " + std::to_string(installed) + " of " +
-                    plural(paths.size(), "CIA") + "." +
-                    (kept > 0 ? " " + std::to_string(kept) +
-                                    (kept == 1 ? " was" : " were") +
-                                    " already installed."
-                              : ""),
-                failed.empty() ? ui::Tone::Success : ui::Tone::Warning,
-                failed.empty() ? "" : "Not installed: " + list);
+    ui::Dialog dialog;
+    dialog.title = summary;
+    dialog.tone = ui::Tone::Warning;
+    dialog.buttons = {"OK"};
+    dialog.drawTop = [&]() { screens::drawNotInstalled("Not Installed", failed); };
+    ui::choose(dialog);
 }
 
 bool App::renameEntry(const std::string &path)

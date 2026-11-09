@@ -4,6 +4,7 @@
 #include "tasks.hpp"
 #include "units.hpp"
 
+#include <algorithm>
 #include <map>
 
 namespace screens {
@@ -137,6 +138,46 @@ std::string ciaName(const cia::Info &info)
     return info.smdh.shortName.empty()
         ? "title " + cia::titleIdText(info.titleId)
         : info.smdh.shortName;
+}
+
+void drawNotInstalled(const std::string &title,
+                      const std::vector<NotInstalled> &failed)
+{
+    ui::drawTopChrome(title, ui::Icon::Warning, ui::color::IconOrange);
+    ui::drawPanel();
+    const float left = ui::TopPanel.x + 18;
+    const float width = ui::TopPanel.w - 36;
+    const float bottom = ui::TopPanel.y + ui::TopPanel.h - 8;
+    const float nameHeight = ui::lineHeight(ui::type::Small);
+    const float whyHeight = ui::lineHeight(ui::type::Tiny);
+    float y = ui::TopPanel.y + 12;
+    for (size_t index = 0; index < failed.size(); ++index) {
+        // The list already says these failed, so the reason starts at what
+        // went wrong.
+        std::string why = failed[index].why;
+        const std::string lead = "The install failed. ";
+        if (why.compare(0, lead.size(), lead) == 0) {
+            why.erase(0, lead.size());
+        }
+        const size_t whyLines = std::min<size_t>(
+            2, ui::wrap(why, ui::type::Tiny, width, 2).size());
+        const bool last = index + 1 == failed.size();
+        // Room for this one, and for the line saying how many are left.
+        const float needed = nameHeight + whyLines * whyHeight +
+                             (last ? 0 : nameHeight);
+        if (y + needed > bottom) {
+            ui::drawText("And " + std::to_string(failed.size() - index) + " more",
+                         left, y, ui::type::Small, ui::color::Muted);
+            return;
+        }
+        y = ui::drawWrapped(failed[index].name, left, y, ui::type::Small,
+                            ui::color::InkStrong, width, 1);
+        if (!why.empty()) {
+            y = ui::drawWrapped(why, left, y, ui::type::Tiny, ui::color::Muted,
+                                width, 2);
+        }
+        y += 6;
+    }
 }
 
 void addCiaParagraphs(ui::Dialog &dialog, const cia::Info &info)

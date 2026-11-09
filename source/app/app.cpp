@@ -1174,12 +1174,16 @@ bool App::replaceRunning(const std::string &path, const cia::Info &info,
 }
 
 bool App::installCia(const std::string &path, const cia::Info &info,
-                     bool deleteAfter, const std::string &address, bool quiet,
-                     bool *alreadyInstalled, std::string *why)
+                     bool deleteAfter, const std::string &address,
+                     InstallDialogs dialogs, bool *alreadyInstalled,
+                     std::string *why)
 {
     if (alreadyInstalled != nullptr) {
         *alreadyInstalled = false;
     }
+    // In a batch the caller says what failed once it is over, so the rest
+    // go in without waiting for OK.
+    const bool sayFailures = dialogs != InstallDialogs::None;
     // Why it stopped, for whoever asked from elsewhere.
     const auto stopped = [why](const std::string &reason) {
         if (why != nullptr) {
@@ -1189,15 +1193,19 @@ bool App::installCia(const std::string &path, const cia::Info &info,
     };
     const std::string name = ciaName(info);
     if (!installer::available()) {
-        ui::message("Cannot install", installer::unavailableReason(),
-                    ui::Tone::Error);
+        if (sayFailures) {
+            ui::message("Cannot install", installer::unavailableReason(),
+                        ui::Tone::Error);
+        }
         return stopped(installer::unavailableReason());
     }
     if (cia::isSystemTitle(info.titleId)) {
-        ui::message("Not installed",
-                    "3dsDL does not install system titles. A broken one can "
-                    "stop the console from starting.",
-                    ui::Tone::Error, cia::titleIdText(info.titleId));
+        if (sayFailures) {
+            ui::message("Not installed",
+                        "3dsDL does not install system titles. A broken one "
+                        "can stop the console from starting.",
+                        ui::Tone::Error, cia::titleIdText(info.titleId));
+        }
         return stopped("3dsDL does not install system titles.");
     }
 
@@ -1330,13 +1338,15 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         const int64_t needed = installer::requiredSpace(path, info);
         const int64_t free = platform::sdFreeBytes();
         if (needed > 0 && free >= 0 && needed > free) {
-            ui::message("Not enough space",
-                        name + " needs " +
-                            units::bytes(static_cast<uint64_t>(needed)) +
-                            " on the SD card and " +
-                            units::bytes(static_cast<uint64_t>(free)) +
-                            " is free.",
-                        ui::Tone::Error);
+            if (sayFailures) {
+                ui::message("Not enough space",
+                            name + " needs " +
+                                units::bytes(static_cast<uint64_t>(needed)) +
+                                " on the SD card and " +
+                                units::bytes(static_cast<uint64_t>(free)) +
+                                " is free.",
+                            ui::Tone::Error);
+            }
             return stopped("It needs " + units::bytes(static_cast<uint64_t>(needed)) +
                            " on the SD card and " +
                            units::bytes(static_cast<uint64_t>(free)) + " is free.");
@@ -1358,8 +1368,10 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         if (removeFirst) {
             std::string error;
             if (!installer::removeTitle(info.titleId, error)) {
-                ui::message("Could not replace " + currentName, error,
-                            ui::Tone::Error);
+                if (sayFailures) {
+                    ui::message("Could not replace " + currentName, error,
+                                ui::Tone::Error);
+                }
                 return stopped("Could not remove the installed " + currentName +
                                ": " + error);
             }
@@ -1380,7 +1392,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
     sdChanged("sdmc:/Nintendo 3DS/");
 
     if (result.outcome == installer::Outcome::Cancelled) {
-        if (ui::keepRunning()) {
+        if (sayFailures && ui::keepRunning()) {
             ui::message("Install cancelled", result.message);
         }
         return stopped("The install was stopped on the 3DS.");
@@ -1389,8 +1401,10 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         if (!address.empty()) {
             markInstalled(address, path, "Install failed: " + result.message);
         }
-        ui::message("Install failed", result.message, ui::Tone::Error,
-                    name);
+        if (sayFailures) {
+            ui::message("Install failed", result.message, ui::Tone::Error,
+                        name);
+        }
         return stopped(result.message);
     }
 
@@ -1428,7 +1442,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
                       deleteAfter ? "Installed, file deleted" : "Installed");
     }
 
-    if (quiet) {
+    if (dialogs != InstallDialogs::All) {
         return true;
     }
 

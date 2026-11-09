@@ -94,19 +94,25 @@ private:
     // Asks what to do with a CIA that just finished downloading.
     void offerInstall(const std::string &path, const std::string &address,
                       const std::string &summary);
+    // Which of installCia's dialogs show. Its questions (replacing what is
+    // installed, a title only the New 3DS starts) are always asked.
+    enum class InstallDialogs {
+        All,      // how it went, and what can be done next
+        Failures, // one of several in a row: only why one did not go in
+        None,     // one of a batch that names each failure itself, from why
+    };
     // Installs the CIA at path after the checks and questions that come
     // first. address is the download it came from, or "" for a file picked
     // on the SD card. Returns true when it was installed.
-    // quiet skips the success screen, for installing several in a row.
     // True once the CIA's title is installed, including when the same
     // version already was and the person chose to keep it; alreadyInstalled
     // then says so. why, when given, is set to the reason it was not
     // installed, or to why nothing went in when it was already, for
-    // whoever asked from elsewhere (the Receive page).
+    // whoever asked from elsewhere (the Receive page, a batch's summary).
     bool installCia(const std::string &path, const cia::Info &info,
                     bool deleteAfter, const std::string &address,
-                    bool quiet = false, bool *alreadyInstalled = nullptr,
-                    std::string *why = nullptr);
+                    InstallDialogs dialogs = InstallDialogs::All,
+                    bool *alreadyInstalled = nullptr, std::string *why = nullptr);
     // Puts an older version of the running app (3dsDL itself), or the same
     // one again, in its place: the CIA goes in whole but uncommitted, then
     // the running one is removed and the new one committed, so only that

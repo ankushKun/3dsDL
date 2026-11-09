@@ -787,6 +787,8 @@ void App::runQueue(const std::vector<uint64_t> *ids,
     size_t saved = 0;
     std::vector<std::string> savedNames;
     size_t installed = 0;
+    // CIAs that came down but did not go in, with why.
+    std::vector<screens::NotInstalled> notInstalled;
     size_t failed = 0;
     bool stopped = false;
     for (size_t position = 0; position < order.size() && !stopped; ++position) {
@@ -923,15 +925,22 @@ void App::runQueue(const std::vector<uint64_t> *ids,
             continue;
         }
         cia::Info info;
-        std::string error;
-        if (readCia(placed.path, info, error) &&
+        std::string why;
+        // On its own the queue names what did not go in once it is done, so
+        // the downloads after it go on; Receive, which lists each link, says
+        // a failure as it happens.
+        const InstallDialogs dialogs =
+            results == nullptr ? InstallDialogs::None : InstallDialogs::Failures;
+        if (readCia(placed.path, info, why) &&
             installCia(placed.path, info,
                        ciaAction == CiaAction::InstallAndDelete, item.url,
-                       true)) {
+                       dialogs, nullptr, &why)) {
             ++installed;
             if (results != nullptr) {
                 results->back().status = HistoryStatus::Installed;
             }
+        } else if (results == nullptr) {
+            notInstalled.push_back({basename(placed.path), why});
         }
     }
     if (results != nullptr) {
@@ -941,6 +950,9 @@ void App::runQueue(const std::vector<uint64_t> *ids,
     std::string summary = plural(saved, "file") + " downloaded";
     if (installed > 0) {
         summary += ", " + std::to_string(installed) + " installed";
+    }
+    if (!notInstalled.empty()) {
+        summary += ", " + std::to_string(notInstalled.size()) + " not installed";
     }
     if (failed > 0) {
         summary += ", " + std::to_string(failed) + " failed";
@@ -959,6 +971,17 @@ void App::runQueue(const std::vector<uint64_t> *ids,
     }
     if (savedNames.size() > 6) {
         names += " and " + std::to_string(savedNames.size() - 6) + " more";
+    }
+    if (!notInstalled.empty()) {
+        ui::Dialog dialog;
+        dialog.title = summary;
+        dialog.tone = ui::Tone::Warning;
+        dialog.buttons = {"OK"};
+        dialog.drawTop = [&]() {
+            screens::drawNotInstalled("Not Installed", notInstalled);
+        };
+        ui::choose(dialog);
+        return;
     }
     ui::message(failed == 0 && !stopped ? "Queue Done" : "Queue Finished",
                 summary,
@@ -1316,8 +1339,8 @@ void App::receiveScreen()
             std::string why;
             bool already = false;
             const bool ok = readCia(path, info, why) &&
-                            installCia(path, info, deleteAfter, "", true,
-                                       &already, &why);
+                            installCia(path, info, deleteAfter, "",
+                                       InstallDialogs::Failures, &already, &why);
             const bool went = ok && !already;
             if (!went) {
                 if (why.empty()) {
