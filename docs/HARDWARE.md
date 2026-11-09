@@ -144,7 +144,9 @@ installed, and a game older than the installed version.
     restarts into it, and log.txt has install.replace from and to. The same
     version asks Reinstall. If the console refuses, 3dsDL stays as it was
     and says why. An older version of another app asks first, keeps its save
-    as a "Before Reinstall" backup, and installs.
+    as a "Before Reinstall" backup, and installs. (0.9.0 failed this on a
+    New 3DS XL on 2026-11-09: 0xD8A08012 after removing itself, as removing
+    a title also deleted the import waiting to be committed.)
 33. An update and a DLC install over their game, and LAUNCH opens the game.
 34. An install has no Cancel, B does nothing and HOME is held back until it
     ends. Stopping one used to leave the SD card unreadable until a restart

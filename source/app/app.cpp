@@ -1119,25 +1119,27 @@ bool App::replaceRunning(const std::string &path, const cia::Info &info,
     }
 
     // AM refuses an older version, or the same one, over the installed one,
-    // and the running one is not removed until this one is in whole: taken
-    // in without being committed, it is checked as it goes.
-    const installer::Result result =
+    // and removing a title deletes its folder, a pending import of it with
+    // it, so a copy taken in uncommitted cannot outlive the removal (it left
+    // a console without 3dsDL). The CIA goes in uncommitted only to be checked
+    // whole, that copy is dropped, and the real install follows the removal:
+    // the file has passed AM's checks before anything is removed.
+    const installer::Result checked =
         tasks::install(path, info.titleId, name, info.smdh.icon, false);
+    installer::forgetImport(info.titleId);
     sdChanged("sdmc:/Nintendo 3DS/");
-    if (result.outcome != installer::Outcome::Installed) {
-        installer::forgetImport(info.titleId);
+    if (checked.outcome != installer::Outcome::Installed) {
         const std::string reason =
-            result.versionRefused
+            checked.versionRefused
                 ? "The console will not take this version while " + installedText +
                       " is installed. Start " + name +
                       " from the Homebrew Launcher and install it from there."
-                : result.message;
+                : checked.message;
         ui::message("Install failed", reason, ui::Tone::Error, name);
         return stopped(reason);
     }
     std::string error;
     if (!installer::removeTitle(info.titleId, error)) {
-        installer::forgetImport(info.titleId);
         logging::warn("install.replace", {{"title", cia::titleIdText(info.titleId)},
                                           {"step", "remove"}, {"message", error}});
         const std::string reason = "The running " + name + " could not be removed. " +
@@ -1145,11 +1147,15 @@ bool App::replaceRunning(const std::string &path, const cia::Info &info,
         ui::message("Not Installed", reason, ui::Tone::Error);
         return stopped(reason);
     }
-    if (!installer::commitImport(info.titleId, error)) {
+    const installer::Result result =
+        tasks::install(path, info.titleId, name, info.smdh.icon);
+    sdChanged("sdmc:/Nintendo 3DS/");
+    if (result.outcome != installer::Outcome::Installed) {
         logging::error("install.replace", {{"title", cia::titleIdText(info.titleId)},
-                                           {"step", "commit"}, {"message", error}});
+                                           {"step", "install"},
+                                           {"message", result.message}});
         const std::string reason = name + " was removed, and " + fileText +
-                                   " did not go in. " + error +
+                                   " did not go in. " + result.message +
                                    " Install a " + name + " CIA again with FBI or "
                                    "from the Homebrew Launcher.";
         ui::message("Not Installed", reason, ui::Tone::Error);

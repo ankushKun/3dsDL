@@ -49,12 +49,11 @@ struct Result {
 
 // path is an sdmc:/ path to a CIA, or a .zcia, whose title ID is titleId.
 // Without commit, AM keeps what it took in as an unfinished install until
-// commitImport or forgetImport, so the installed version only has to go
-// once the new one is in whole.
+// forgetImport: a way to check a CIA goes in whole before anything is
+// removed. Removing the title deletes such an install along with it, so it
+// can never be committed in place of the installed one.
 Result installCia(const std::string &path, uint64_t titleId,
                   Observer &observer, bool commit = true);
-// Makes an install left uncommitted the installed title.
-bool commitImport(uint64_t titleId, std::string &error);
 // Drops an install left uncommitted.
 void forgetImport(uint64_t titleId);
 
