@@ -967,21 +967,16 @@ void App::runQueue(const std::vector<uint64_t> *ids,
     if (savedNames.size() > 6) {
         names += " and " + std::to_string(savedNames.size() - 6) + " more";
     }
+    // What did not go in comes first, with why, then the queue's own
+    // summary with what was saved.
     if (!notInstalled.empty()) {
-        ui::Dialog dialog;
-        dialog.title = summary;
-        dialog.tone = ui::Tone::Warning;
-        dialog.buttons = {"OK"};
-        dialog.drawTop = [&]() {
-            screens::drawNotInstalled("Not Installed", notInstalled);
-        };
-        ui::choose(dialog);
-        return;
+        screens::showNotInstalled(plural(notInstalled.size(), "CIA") +
+                                      " not installed.",
+                                  notInstalled);
     }
-    ui::message(failed == 0 && !stopped ? "Queue Done" : "Queue Finished",
-                summary,
-                failed == 0 && !stopped ? ui::Tone::Success
-                                        : ui::Tone::Warning,
+    const bool allWell = failed == 0 && !stopped && notInstalled.empty();
+    ui::message(allWell ? "Queue Done" : "Queue Finished", summary,
+                allWell ? ui::Tone::Success : ui::Tone::Warning,
                 names.empty() ? "" : "Saved: " + names + ".");
 }
 

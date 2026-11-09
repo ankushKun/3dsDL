@@ -56,6 +56,10 @@ struct NotInstalled {
 // why, as many as fit, then how many more.
 void drawNotInstalled(const std::string &title,
                       const std::vector<NotInstalled> &failed);
+// The dialog that ends a batch with failures: summary in the box, each
+// failure with why on the top screen, and OK.
+void showNotInstalled(const std::string &summary,
+                      const std::vector<NotInstalled> &failed);
 // Publisher, kind, version, size and the installed version, if any.
 void addCiaParagraphs(ui::Dialog &dialog, const cia::Info &info);
 

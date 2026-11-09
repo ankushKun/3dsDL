@@ -1070,8 +1070,9 @@ void App::offerInstall(const std::string &path, const std::string &address,
 
 bool App::replaceRunning(const std::string &path, const cia::Info &info,
                          uint16_t installed, bool deleteAfter, std::string *why,
-                         bool *kept)
+                         InstallDialogs dialogs, bool *kept)
 {
+    const bool sayFailures = dialogs != InstallDialogs::None;
     const auto stopped = [why](const std::string &reason) {
         if (why != nullptr) {
             *why = reason;
@@ -1108,11 +1109,13 @@ bool App::replaceRunning(const std::string &path, const cia::Info &info,
     const int64_t needed = installer::requiredSpace(path, info);
     const int64_t free = platform::sdFreeBytes();
     if (needed > 0 && free >= 0 && needed > free) {
-        ui::message("Not enough space",
-                    name + " needs " + units::bytes(static_cast<uint64_t>(needed)) +
-                        " on the SD card and " +
-                        units::bytes(static_cast<uint64_t>(free)) + " is free.",
-                    ui::Tone::Error);
+        if (sayFailures) {
+            ui::message("Not enough space",
+                        name + " needs " + units::bytes(static_cast<uint64_t>(needed)) +
+                            " on the SD card and " +
+                            units::bytes(static_cast<uint64_t>(free)) + " is free.",
+                        ui::Tone::Error);
+        }
         return stopped("It needs " + units::bytes(static_cast<uint64_t>(needed)) +
                        " on the SD card and " +
                        units::bytes(static_cast<uint64_t>(free)) + " is free.");
@@ -1135,7 +1138,9 @@ bool App::replaceRunning(const std::string &path, const cia::Info &info,
                       " is installed. Start " + name +
                       " from the Homebrew Launcher and install it from there."
                 : checked.message;
-        ui::message("Install failed", reason, ui::Tone::Error, name);
+        if (sayFailures) {
+            ui::message("Install failed", reason, ui::Tone::Error, name);
+        }
         return stopped(reason);
     }
     std::string error;
@@ -1144,7 +1149,9 @@ bool App::replaceRunning(const std::string &path, const cia::Info &info,
                                           {"step", "remove"}, {"message", error}});
         const std::string reason = "The running " + name + " could not be removed. " +
                                    error + " Nothing was changed.";
-        ui::message("Not Installed", reason, ui::Tone::Error);
+        if (sayFailures) {
+            ui::message("Not Installed", reason, ui::Tone::Error);
+        }
         return stopped(reason);
     }
     const installer::Result result =
@@ -1158,7 +1165,9 @@ bool App::replaceRunning(const std::string &path, const cia::Info &info,
                                    " did not go in. " + result.message +
                                    " Install a " + name + " CIA again with FBI or "
                                    "from the Homebrew Launcher.";
-        ui::message("Not Installed", reason, ui::Tone::Error);
+        if (sayFailures) {
+            ui::message("Not Installed", reason, ui::Tone::Error);
+        }
         return stopped(reason);
     }
     logging::info("install.replace", {{"title", cia::titleIdText(info.titleId)},
@@ -1303,7 +1312,8 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         if (isRunning) {
             bool kept = false;
             const bool replaced =
-                replaceRunning(path, info, installed, deleteAfter, why, &kept);
+                replaceRunning(path, info, installed, deleteAfter, why, dialogs,
+                               &kept);
             if (alreadyInstalled != nullptr) {
                 *alreadyInstalled = kept;
             }
@@ -1330,7 +1340,7 @@ bool App::installCia(const std::string &path, const cia::Info &info,
         removeFirst = true;
     } else if (isInstalled && installed > info.version) {
         if (isRunning) {
-            return replaceRunning(path, info, installed, deleteAfter, why);
+            return replaceRunning(path, info, installed, deleteAfter, why, dialogs);
         }
         if (!confirmReplace("A newer version of " + name +
                             " is installed")) {

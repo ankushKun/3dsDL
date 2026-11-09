@@ -2273,12 +2273,7 @@ void App::installCias(const std::vector<std::string> &paths, bool deleteAfter)
         ui::message("All installed", summary, ui::Tone::Success);
         return;
     }
-    ui::Dialog dialog;
-    dialog.title = summary;
-    dialog.tone = ui::Tone::Warning;
-    dialog.buttons = {"OK"};
-    dialog.drawTop = [&]() { screens::drawNotInstalled("Not Installed", failed); };
-    ui::choose(dialog);
+    screens::showNotInstalled(summary, failed);
 }
 
 bool App::renameEntry(const std::string &path)

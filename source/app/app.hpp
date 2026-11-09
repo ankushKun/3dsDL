@@ -114,13 +114,15 @@ private:
                     InstallDialogs dialogs = InstallDialogs::All,
                     bool *alreadyInstalled = nullptr, std::string *why = nullptr);
     // Puts an older version of the running app (3dsDL itself), or the same
-    // one again, in its place: the CIA goes in whole but uncommitted, then
-    // the running one is removed and the new one committed, so only that
-    // last step can leave it uninstalled. It starts again afterwards. kept,
-    // when given, is set when the same version was asked about and kept.
+    // one again, in its place: the CIA goes in uncommitted to check it goes
+    // in whole, that copy is dropped, the running one is removed, then the
+    // CIA is installed. Only that last install can leave it uninstalled, with
+    // a file AM has just taken whole. It starts again afterwards. kept, when
+    // given, is set when the same version was asked about and kept. Failures
+    // have dialogs unless dialogs is InstallDialogs::None.
     bool replaceRunning(const std::string &path, const cia::Info &info,
                         uint16_t installed, bool deleteAfter, std::string *why,
-                        bool *kept = nullptr);
+                        InstallDialogs dialogs, bool *kept = nullptr);
     void markInstalled(const std::string &address, const std::string &path,
                        const std::string &message);
 

@@ -180,6 +180,17 @@ void drawNotInstalled(const std::string &title,
     }
 }
 
+void showNotInstalled(const std::string &summary,
+                      const std::vector<NotInstalled> &failed)
+{
+    ui::Dialog dialog;
+    dialog.title = summary;
+    dialog.tone = ui::Tone::Warning;
+    dialog.buttons = {"OK"};
+    dialog.drawTop = [&]() { drawNotInstalled("Not Installed", failed); };
+    ui::choose(dialog);
+}
+
 void addCiaParagraphs(ui::Dialog &dialog, const cia::Info &info)
 {
     if (!info.smdh.publisher.empty()) {
