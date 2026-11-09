@@ -181,6 +181,10 @@ std::string contentDispositionFilename(const std::string &header)
 
 std::string urlFilename(const std::string &address)
 {
+    // A Drive link's path names its page ("view", "download"), never its file.
+    if (!url::driveDownload(address).empty()) {
+        return "";
+    }
     return url::percentDecode(url::lastPathSegment(address));
 }
 

@@ -96,6 +96,13 @@ TEST("naming: chooseFilename prefers the header, then the URL")
              std::string("download.bin"));
     CHECK_EQ(naming::chooseFilename("attachment", "https://x/f.3dsx"),
              std::string("f.3dsx"));
+    // A Drive link's path names its page, not its file.
+    CHECK_EQ(naming::chooseFilename("", "https://drive.google.com/file/d/abc/"
+                                        "view?usp=drive_link"),
+             std::string("download.bin"));
+    CHECK_EQ(naming::chooseFilename("", "https://drive.usercontent.google.com/"
+                                        "download?id=abc&export=download"),
+             std::string("download.bin"));
 }
 
 TEST("naming: stem, extension and unused paths")

@@ -27,6 +27,45 @@ std::string authority(const std::string &value)
     return rest.substr(0, rest.find_first_of("/?#"));
 }
 
+// The path, without query or fragment: "/a/b" for "https://x/a/b?c".
+std::string path(const std::string &value)
+{
+    std::string rest = afterScheme(value);
+    rest.erase(std::min(rest.find_first_of("?#"), rest.size()));
+    const size_t slash = rest.find('/');
+    return slash == std::string::npos ? "" : rest.substr(slash);
+}
+
+// The first value of a query parameter, still percent-encoded, or "".
+std::string queryValue(const std::string &value, const std::string &name)
+{
+    const size_t question = value.find('?');
+    if (question == std::string::npos) {
+        return "";
+    }
+    std::string query = value.substr(question + 1);
+    query.erase(std::min(query.find('#'), query.size()));
+    size_t start = 0;
+    while (start <= query.size()) {
+        const size_t end = std::min(query.find('&', start), query.size());
+        const std::string pair = query.substr(start, end - start);
+        const size_t equals = pair.find('=');
+        if (equals != std::string::npos && pair.substr(0, equals) == name) {
+            return pair.substr(equals + 1);
+        }
+        start = end + 1;
+    }
+    return "";
+}
+
+// Drive's file IDs and resource keys are letters, digits, '-' and '_'.
+bool isDriveToken(const std::string &value)
+{
+    return !value.empty() &&
+           value.find_first_not_of("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnop"
+                                   "qrstuvwxyz0123456789-_") == std::string::npos;
+}
+
 int hexValue(char character)
 {
     if (character >= '0' && character <= '9') {
@@ -121,17 +160,45 @@ std::string site(const std::string &host)
     return out;
 }
 
-std::string lastPathSegment(const std::string &value)
+std::string driveDownload(const std::string &value)
 {
-    std::string rest = afterScheme(value);
-    rest.erase(std::min(rest.find_first_of("?#"), rest.size()));
-
-    const size_t pathStart = rest.find('/');
-    if (pathStart == std::string::npos) {
+    const std::string where = host(value);
+    if (where != "drive.google.com" && where != "docs.google.com" &&
+        where != "drive.usercontent.google.com") {
         return "";
     }
-    const std::string path = rest.substr(pathStart);
-    return path.substr(path.find_last_of('/') + 1);
+    // Share links name the file in their path (/file/d/ID/view, also under
+    // /u/N/ when signed in to several accounts), download links in ?id=.
+    const std::string route = path(value);
+    std::string id;
+    const std::string marker = "/file/d/";
+    const size_t file = route.find(marker);
+    if (file != std::string::npos) {
+        const size_t start = file + marker.size();
+        id = route.substr(start, route.find('/', start) - start);
+    } else {
+        const std::string last = route.substr(route.find_last_of('/') + 1);
+        if (last == "uc" || last == "open" || last == "download") {
+            id = queryValue(value, "id");
+        }
+    }
+    if (!isDriveToken(id)) {
+        return "";
+    }
+    std::string out = "https://drive.usercontent.google.com/download?id=" + id +
+                      "&export=download&confirm=t";
+    // Files shared by link before 2021 also need their resource key.
+    const std::string key = queryValue(value, "resourcekey");
+    if (isDriveToken(key)) {
+        out += "&resourcekey=" + key;
+    }
+    return out;
+}
+
+std::string lastPathSegment(const std::string &value)
+{
+    const std::string route = path(value);
+    return route.substr(route.find_last_of('/') + 1); // npos + 1 is 0
 }
 
 std::string percentDecode(const std::string &value)

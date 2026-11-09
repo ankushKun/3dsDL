@@ -95,3 +95,58 @@ TEST("url: the site a host belongs to")
     CHECK_EQ(url::site(""), std::string(""));
     CHECK(url::site("objects.githubusercontent.com") != url::site("github.com"));
 }
+
+TEST("url: Google Drive links become the file's download")
+{
+    const std::string file = "https://drive.usercontent.google.com/download?"
+                             "id=1xp24Q4Lwpp59N80L1l3FDuN5_uuH-Y6B&export="
+                             "download&confirm=t";
+    CHECK_EQ(url::driveDownload("https://drive.google.com/file/d/"
+                                "1xp24Q4Lwpp59N80L1l3FDuN5_uuH-Y6B/view?usp="
+                                "drive_link"),
+             file);
+    CHECK_EQ(url::driveDownload("https://drive.google.com/u/0/uc?id="
+                                "1xp24Q4Lwpp59N80L1l3FDuN5_uuH-Y6B"),
+             file);
+    CHECK_EQ(url::driveDownload("HTTPS://DRIVE.GOOGLE.COM/u/1/file/d/"
+                                "1xp24Q4Lwpp59N80L1l3FDuN5_uuH-Y6B/edit"),
+             file);
+    CHECK_EQ(url::driveDownload("https://drive.google.com/uc?export=download&"
+                                "id=1xp24Q4Lwpp59N80L1l3FDuN5_uuH-Y6B"),
+             file);
+    CHECK_EQ(url::driveDownload("https://drive.google.com/open?id="
+                                "1xp24Q4Lwpp59N80L1l3FDuN5_uuH-Y6B#x"),
+             file);
+    CHECK_EQ(url::driveDownload("https://drive.usercontent.google.com/download?"
+                                "id=1xp24Q4Lwpp59N80L1l3FDuN5_uuH-Y6B&export="
+                                "download&confirm=abc&uuid=a33e710d"),
+             file);
+    CHECK_EQ(url::driveDownload("https://docs.google.com/uc?id="
+                                "1xp24Q4Lwpp59N80L1l3FDuN5_uuH-Y6B"),
+             file);
+    CHECK_EQ(url::driveDownload(file), file);
+    CHECK_EQ(url::driveDownload("https://drive.google.com/file/d/abc_-1/view?"
+                                "resourcekey=0-Xy_z"),
+             std::string("https://drive.usercontent.google.com/download?"
+                         "id=abc_-1&export=download&confirm=t&resourcekey=0-Xy_z"));
+}
+
+TEST("url: other links are not Drive files")
+{
+    CHECK_EQ(url::driveDownload("https://drive.google.com/drive/folders/abc"),
+             std::string(""));
+    CHECK_EQ(url::driveDownload("https://docs.google.com/document/d/abc/edit"),
+             std::string(""));
+    CHECK_EQ(url::driveDownload("https://drive.google.com/uc?export=download"),
+             std::string(""));
+    CHECK_EQ(url::driveDownload("https://drive.google.com/file/d//view"),
+             std::string(""));
+    CHECK_EQ(url::driveDownload("https://drive.google.com/open?id=a%26b"),
+             std::string(""));
+    CHECK_EQ(url::driveDownload("https://notdrive.google.com/file/d/abc/view"),
+             std::string(""));
+    CHECK_EQ(url::driveDownload("https://example.com/drive.google.com/file/d/a"),
+             std::string(""));
+    CHECK_EQ(url::driveDownload("https://example.com/uc?id=abc"),
+             std::string(""));
+}

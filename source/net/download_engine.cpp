@@ -28,10 +28,11 @@ namespace {
 
 constexpr size_t FileBufferSize = 256 * 1024;
 constexpr long CurlBufferSize = 128 * 1024;
-// A download starts over at most twice: once when the file changed since the
-// partial download, and once more on one connection when the server
-// mishandles ranges.
-constexpr int MaxAttempts = 3;
+// A download starts over at most three times: once to ask Google Drive for
+// the file instead of its page, once when the file changed since the partial
+// download, and once more on one connection when the server mishandles
+// ranges.
+constexpr int MaxAttempts = 4;
 // Failed connections of a split download that are reopened before giving up.
 constexpr int MaxReconnects = 8;
 // Pieces are split on this boundary so SD card writes stay aligned.
@@ -87,7 +88,10 @@ struct Transfer {
     CURLM *multi = nullptr;
     CURLSH *share = nullptr;
     FILE *file = nullptr;
-    std::string url;
+    std::string address; // the link asked for, which names the partial files
+    std::string url;     // what the lead requests for it
+    // The file itself, when the lead reached a page about it instead.
+    std::string instead;
     PartialPaths paths;
     uint64_t fileBytes = 0; // size of the file when this attempt began
 
@@ -117,6 +121,7 @@ struct Transfer {
     std::string filename;
     std::string effectiveUrl;
     std::string failure; // set by our own checks, overrides curl's message
+    bool tryLater = false; // ... and what arrived before still holds
     bool noSpace = false; // the SD card is too full for the file
 
     // The response status, and the failure that ended the attempt.
@@ -236,6 +241,13 @@ bool store(Transfer &transfer, Connection &connection, const char *data,
     return true;
 }
 
+bool isHtml(CURL *curl)
+{
+    char *type = nullptr;
+    curl_easy_getinfo(curl, CURLINFO_CONTENT_TYPE, &type);
+    return type != nullptr && text::startsWithNoCase(type, "text/html");
+}
+
 // The total size a response describes. requestStart is where the request
 // asked to begin.
 uint64_t responseTotal(const Connection &connection, long status,
@@ -249,6 +261,30 @@ uint64_t responseTotal(const Connection &connection, long status,
     curl_easy_getinfo(connection.curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T,
                       &length);
     return length >= 0 ? requestStart + static_cast<uint64_t>(length) : 0;
+}
+
+// Google Drive answers with a page for a link that redirects to a share
+// link, and for a file it will not give (private, or past its download
+// limit). Asks for the file itself once, and never saves the page. True when
+// the lead's answer was such a page.
+bool drivePage(Transfer &transfer, Connection &lead)
+{
+    if (!lead.contentDisposition.empty() || !isHtml(lead.curl)) {
+        return false;
+    }
+    const std::string file = url::driveDownload(transfer.effectiveUrl);
+    if (!file.empty() && file != transfer.url) {
+        transfer.instead = file;
+        transfer.restart = true;
+        return true;
+    }
+    if (!file.empty() || !url::driveDownload(transfer.url).empty()) {
+        transfer.failure = "Google Drive did not send the file. It may be "
+                           "private or past its download limit.";
+        transfer.tryLater = true;
+        return true;
+    }
+    return false;
 }
 
 // Runs once the headers of the lead's final response are known, before any
@@ -265,6 +301,9 @@ bool begin(Transfer &transfer, Connection &lead)
     transfer.httpStatus = status;
     transfer.effectiveUrl = effective != nullptr ? effective : transfer.url;
     transfer.directUrl = transfer.effectiveUrl;
+    if (drivePage(transfer, lead)) {
+        return false;
+    }
 
     transfer.filename = naming::chooseFilename(lead.contentDisposition,
                                                transfer.effectiveUrl);
@@ -302,7 +341,7 @@ bool begin(Transfer &transfer, Connection &lead)
     }
 
     ResumeInfo &info = transfer.info;
-    info.url = transfer.url;
+    info.url = transfer.address;
     // A 206 answered our If-Range, so the stored validators still hold even
     // when the response leaves them out.
     if (status != 206) {
@@ -611,6 +650,11 @@ void finish(Transfer &transfer, Connection &connection, CURLcode code)
         if (effective != nullptr) {
             transfer.effectiveUrl = effective;
         }
+        // A page answers a resumed request without its range, which libcurl
+        // turns down before the body would reach begin.
+        if (code == CURLE_RANGE_ERROR) {
+            drivePage(transfer, connection);
+        }
         // An empty body never reaches the write callback.
         if (code == CURLE_OK && !begin(transfer, connection)) {
             code = CURLE_WRITE_ERROR;
@@ -855,13 +899,17 @@ Result download(const Request &request, Observer &observer)
         return result;
     }
     const PartialPaths paths = partialPaths(normalised.folder, address);
+    const std::string drive = url::driveDownload(address);
+    std::string lead = drive.empty() ? address : drive;
 
     bool allowSplit = true;
+    bool mayResume = true;
     for (int attempt = 0; attempt < MaxAttempts; ++attempt) {
         Transfer transfer;
         transfer.request = &normalised;
         transfer.observer = &observer;
-        transfer.url = address;
+        transfer.address = address;
+        transfer.url = lead;
         transfer.paths = paths;
         transfer.allowSplit = allowSplit;
         const auto began = std::chrono::steady_clock::now();
@@ -872,12 +920,13 @@ Result download(const Request &request, Observer &observer)
         std::string stored;
         ResumeInfo previous;
         const int64_t existing = fs::fileSize(paths.data);
-        if (normalised.allowResume && attempt == 0 && existing > 0 &&
+        if (normalised.allowResume && mayResume && existing > 0 &&
             fs::readFile(paths.info, stored) &&
             parseResumeInfo(stored, previous) && previous.url == address &&
             !ifRangeValidator(previous).empty()) {
             restore(transfer, previous, static_cast<uint64_t>(existing));
         }
+        mayResume = false;
         if (!transfer.resuming) {
             fs::removeFile(paths.data);
             fs::removeFile(paths.info);
@@ -971,6 +1020,17 @@ Result download(const Request &request, Observer &observer)
             return result;
         }
 
+        if (transfer.restart && !transfer.instead.empty()) {
+            // Nothing was written, so an earlier partial download of the
+            // file still holds.
+            lead = transfer.instead;
+            mayResume = transfer.resuming;
+            if (!transfer.resuming) {
+                fs::removeFile(paths.data);
+                fs::removeFile(paths.info);
+            }
+            continue;
+        }
         if (transfer.restart) {
             fs::removeFile(paths.data);
             fs::removeFile(paths.info);
@@ -1011,9 +1071,10 @@ Result download(const Request &request, Observer &observer)
                 describeFailure(code, result.httpStatus, result.detail);
         }
 
-        const bool resumable = normalised.allowResume && closed &&
-                               transfer.failure.empty() &&
-                               isTransient(code, result.httpStatus);
+        const bool resumable =
+            normalised.allowResume && closed &&
+            (transfer.tryLater || (transfer.failure.empty() &&
+                                   isTransient(code, result.httpStatus)));
         if (resumable) {
             saveInfo(transfer);
         }

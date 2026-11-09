@@ -43,6 +43,10 @@ A Nintendo 3DS homebrew app (C++17, libctru, citro2d) that downloads files, inst
 - Files opened from Receive's list runs while the page can still change the card: `App::takePageChanges_` hands it what changed, and it reads its folder again through `ui::ListSpec::close` once the rows rest.
 - Before asking, Receive follows each link's redirects with `net::whereTo` and names the host it reached; `QueuedLink::host` holds the download to that site (`url::site`), and one that lands elsewhere is a plain link. Every check and download from Receive refuses the console's own address, and another site's also this network (`remote::addressRefused`, through `CURLOPT_PREREQFUNCTION`, so redirects too). Sends not from 3dsDL's own page (`remote::fromOwnPage`: the console's address and the page's header) start on Cancel, `/send` takes at most `remote::MaxSentLinks`, and Don't Allow (offered once a device's links were cancelled) puts it on a links list of its own (`FileSharing::refuseLinks`), separate from the file page's. A sender's link downloads into the Download Folder and moves into its folder only once it belongs there.
 
+## Downloads
+
+- Google Drive links download through `url::driveDownload`, the direct link with Drive's large-file question answered, and a Drive page reached through a redirect restarts the lead once with it. Drive's HTML is never saved as the file.
+
 ## Testing in Azahar
 
 - Azahar only takes taps while it has focus. A build with `THREEDSDL_EXTRA_DEFINES=-DTHREEDSDL_SCRIPTED_INPUT` also reads lines appended to `sdmc:/3ds/3dsDL/input.txt` (`tap X Y` in bottom-screen pixels, or `key A`, `key DOWN` and so on), so it can be driven in the background while screenshots come from the window.

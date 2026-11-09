@@ -19,6 +19,12 @@ std::string host(const std::string &value);
 // ("example.co.uk"). An address is its own site.
 std::string site(const std::string &host);
 
+// The download of a file shared from Google Drive, given any of its share,
+// view or download links, with Drive's question about files too large to
+// scan for viruses already answered. "" for any other link, including Drive
+// folders and Google Docs. The result is its own answer.
+std::string driveDownload(const std::string &value);
+
 // Last path segment, still percent-encoded, without query or fragment.
 std::string lastPathSegment(const std::string &value);
 
