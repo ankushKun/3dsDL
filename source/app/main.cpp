@@ -140,6 +140,9 @@ int main(int argc, char **argv)
         Services services;
         std::string error;
         if (services.start(error)) {
+            // Awake with Wi-Fi held for as long as 3dsDL is open: a closed
+            // lid only darkens the screens, and nothing waits for it to open.
+            const awake::Hold open;
             App app;
             app.run();
         } else {

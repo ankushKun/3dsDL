@@ -63,9 +63,10 @@ and (on New 3DS) CPU speed.
     file.
 14. Close the lid during a download: the screens go dark within a quarter
     second and the download keeps going. Open it: the screens light again.
-    Close it once more and wait past the end: the console sleeps about 30 s
-    after the download ends (log.txt: lid.closed, lid.opened, lid.sleep).
-    Run a queue of three with the lid closed: all three finish.
+    Close it once more and wait past the end: the console stays awake and
+    on Wi-Fi for as long as 3dsDL is open, screens dark (log.txt:
+    lid.closed working=yes network=yes, lid.opened); closing 3dsDL lets it
+    sleep. Run a queue of three with the lid closed: all three finish.
 15. Use `drop_at` on the fixture server with a file under 1 MiB, which uses
     one connection: the failure says the connection dropped and RETRY
     continues from the partial size ("Continuing from…"). With a larger file

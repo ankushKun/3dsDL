@@ -2,8 +2,8 @@
 
 #include "awake_policy.hpp"
 
-// Keeps the console out of sleep and its Wi-Fi connected while 3dsDL works,
-// so closing the lid leaves the work going. The screens go dark while the lid
+// Keeps the console out of sleep and its Wi-Fi connected while held (main
+// holds it for as long as 3dsDL runs), so closing the lid leaves work going. The screens go dark while the lid
 // is closed and light again when it opens. Main thread only, apart from
 // lightScreens.
 namespace awake {

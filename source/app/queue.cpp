@@ -1206,9 +1206,10 @@ void App::receiveScreen()
     bool nameSettled = false;
     std::string hostname; // for log.txt, once settled
 
-    // Awake, and Wi-Fi held, for as long as Receive is open: a closed lid
-    // only darkens the screens, so the page still reaches the console
-    // between transfers, not only during one.
+    // Awake, and Wi-Fi held, for as long as Receive is open, so the page
+    // still reaches the console with the lid shut between transfers (issue
+    // #13). main holds the console awake for the whole run as well; this one
+    // keeps Receive's own promise should that change.
     const awake::Hold keptAwake;
     // The newest report, for the top screen, which shows a finished file a
     // moment longer so a batch does not flicker between its files.
@@ -1269,9 +1270,6 @@ void App::receiveScreen()
         ~Unhook() { app.takePageChanges_ = nullptr; }
     } unhook{*this};
 
-    // Someone using the page holds the console awake, and the linger after
-    // each request covers the gap before the next, so closing the lid never
-    // cuts a batch off between files (issue #13).
     const auto askAbout = [&](const ReceiveJob::Asker &asker) {
         const std::string who = whoIs(asker.device, asker.from);
         ui::Dialog dialog;
