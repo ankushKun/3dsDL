@@ -1065,7 +1065,7 @@ void App::browseFiles(const std::string &select)
         // X sorts, as on the Software lists.
         spec.headingActions = {{"Sort", "X", KEY_X}};
         const auto hint = [&]() {
-            return !marked.empty() ? std::to_string(marked.size()) + " marked"
+            return !marked.empty() ? std::to_string(marked.size()) + " selected"
                  : !clipboard_.empty()
                      ? std::to_string(clipboard_.size()) +
                            (clipboardCut_ ? " to move" : " to paste")
@@ -1864,12 +1864,12 @@ bool App::entryOptions(const std::string &folder,
         add("SHA-256", Action::Checksum);
     }
     if (single) {
-        add(isMarked ? "Unmark" : "Mark", Action::Mark);
+        add(isMarked ? "Deselect" : "Select", Action::Mark);
         add(favorites::contains(settings_.favorites, favorite) ? "Unfavourite"
                                                                : "Favourite",
             Action::Favorite);
     } else {
-        add("Clear Marks", Action::ClearMarks);
+        add("Deselect All", Action::ClearMarks);
     }
     add("This Folder...", Action::Folder);
 
@@ -1906,7 +1906,7 @@ bool App::entryOptions(const std::string &folder,
         }
     }
     const std::string title = single ? folderTitle(folder)
-                                     : plural(paths.size(), "Marked Item");
+                                     : plural(paths.size(), "Selected Item");
     PreviewLoader preview;
     const int choice = ui::menu(items, [&](int) {
         if (single) {
@@ -2033,10 +2033,10 @@ bool App::folderOptions(const std::string &folder,
         Action::Hidden);
     // These act on every entry, so they wait until the folder is read.
     if (!entries.empty()) {
-        add("Mark All", Action::MarkAll, complete);
+        add("Select All", Action::MarkAll, complete);
     }
     if (!marked.empty()) {
-        add("Clear Marks", Action::ClearMarks);
+        add("Deselect All", Action::ClearMarks);
     }
     size_t cias = 0;
     for (const fs::Entry &entry : entries) {
@@ -2068,7 +2068,7 @@ bool App::folderOptions(const std::string &folder,
         facts.push_back({"CIAs", std::to_string(cias)});
     }
     if (!marked.empty()) {
-        facts.push_back({"Marked", plural(marked.size(), "item")});
+        facts.push_back({"Selected", plural(marked.size(), "item")});
     }
     if (!clipboard_.empty()) {
         facts.push_back(clipboardFact(clipboard_.size(), clipboardCut_));
@@ -2771,7 +2771,7 @@ void App::showProperties(const std::vector<std::string> &paths)
                            folder ? path + "/" : path, tags);
             return;
         }
-        ui::drawTopChrome(plural(paths.size(), "Marked Item"), ui::Icon::Check,
+        ui::drawTopChrome(plural(paths.size(), "Selected Item"), ui::Icon::Check,
                           ui::color::Tag);
         std::vector<ui::Fact> facts;
         for (const auto &tag : tags) {

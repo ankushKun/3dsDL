@@ -138,8 +138,10 @@ A recessed panel holds rows 27 px tall on a 31 px pitch: white pills with a
 star before it on Files' favourites. Six rows fit; the D-pad's left and
 right, L/R and the counter page through the rest. A list that gives L or R
 a job of its own, as Files does, pages with the D-pad only. In every list a tap highlights a row and
-a tap on the highlighted row opens it. Marked rows turn light blue and their
-icon becomes a blue check; in Files a tap on a row's icon marks it. The scrollbar's column takes a drag: the thumb follows the stylus, and
+a tap on the highlighted row opens it. Selected rows turn light blue and their
+icon becomes a blue check; in Files a tap on a row's icon or SELECT selects
+it, and the words are Select, Deselect and Select All (the code calls these
+rows marked, as highlighted is the cursor's row). The scrollbar's column takes a drag: the thumb follows the stylus, and
 a touch on the track brings the thumb's middle there. A list that fills in
 while open keeps the row at the top of the view in place as rows arrive above
 it; only a list nobody has touched stays at its first row. A list can put
