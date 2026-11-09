@@ -85,6 +85,16 @@ struct Result {
     // included.
     uint64_t transferred = 0;
     double seconds = 0.0;
+    // Where the first connection's time went before the first byte, in ms,
+    // with every redirect's added in: looking up names, making connections,
+    // TLS handshakes, and waiting for the answers.
+    struct Timing {
+        uint32_t dns = 0;
+        uint32_t connect = 0;
+        uint32_t tls = 0;
+        uint32_t wait = 0;
+        long redirects = 0;
+    } timing;
     // The server's certificate was rejected; often a wrong console clock.
     bool certificateProblem = false;
     // The SD card has too little room for the file.

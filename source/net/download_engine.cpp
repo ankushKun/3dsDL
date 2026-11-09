@@ -120,6 +120,7 @@ struct Transfer {
     uint64_t total = 0;
     std::string filename;
     std::string effectiveUrl;
+    Result::Timing timing; // the lead's, once its answer came
     std::string failure; // set by our own checks, overrides curl's message
     bool tryLater = false; // ... and what arrived before still holds
     bool noSpace = false; // the SD card is too full for the file
@@ -241,6 +242,31 @@ bool store(Transfer &transfer, Connection &connection, const char *data,
     return true;
 }
 
+// libcurl counts each step from the start of the request, so each one's own
+// time is the difference from the step before. A step that did not happen
+// (TLS on http://) reads 0 and costs nothing.
+Result::Timing timingOf(CURL *curl)
+{
+    const auto ms = [curl](CURLINFO info) {
+        curl_off_t microseconds = 0;
+        curl_easy_getinfo(curl, info, &microseconds);
+        return microseconds > 0 ? microseconds / 1000 : 0;
+    };
+    const curl_off_t named = ms(CURLINFO_NAMELOOKUP_TIME_T);
+    const curl_off_t connected = std::max(named, ms(CURLINFO_CONNECT_TIME_T));
+    const curl_off_t secured =
+        std::max(connected, ms(CURLINFO_APPCONNECT_TIME_T));
+    const curl_off_t answered =
+        std::max(secured, ms(CURLINFO_STARTTRANSFER_TIME_T));
+    Result::Timing timing;
+    timing.dns = static_cast<uint32_t>(named);
+    timing.connect = static_cast<uint32_t>(connected - named);
+    timing.tls = static_cast<uint32_t>(secured - connected);
+    timing.wait = static_cast<uint32_t>(answered - secured);
+    curl_easy_getinfo(curl, CURLINFO_REDIRECT_COUNT, &timing.redirects);
+    return timing;
+}
+
 bool isHtml(CURL *curl)
 {
     char *type = nullptr;
@@ -301,6 +327,7 @@ bool begin(Transfer &transfer, Connection &lead)
     transfer.httpStatus = status;
     transfer.effectiveUrl = effective != nullptr ? effective : transfer.url;
     transfer.directUrl = transfer.effectiveUrl;
+    transfer.timing = timingOf(lead.curl);
     if (drivePage(transfer, lead)) {
         return false;
     }
@@ -650,6 +677,7 @@ void finish(Transfer &transfer, Connection &connection, CURLcode code)
         if (effective != nullptr) {
             transfer.effectiveUrl = effective;
         }
+        transfer.timing = timingOf(connection.curl);
         // A page answers a resumed request without its range, which libcurl
         // turns down before the body would reach begin.
         if (code == CURLE_RANGE_ERROR) {
@@ -994,6 +1022,7 @@ Result download(const Request &request, Observer &observer)
             : transfer.effectiveUrl;
         result.resumed = transfer.resuming;
         result.connections = transfer.peakConnections;
+        result.timing = transfer.timing;
         result.transferred = receivedBytes(transfer) - resumedBytes;
         result.seconds = std::chrono::duration<double>(
                              std::chrono::steady_clock::now() - began)

@@ -46,6 +46,7 @@ A Nintendo 3DS homebrew app (C++17, libctru, citro2d) that downloads files, inst
 ## Downloads
 
 - Google Drive links download through `url::driveDownload`, the direct link with Drive's large-file question answered, and a Drive page reached through a redirect restarts the lead once with it. Drive's HTML is never saved as the file.
+- `download.done` and `.failed` log where the first connection's time went before its first byte: `dnsMs`, `connectMs`, `tlsMs`, `waitMs` and `redirects`.
 
 ## Testing in Azahar
 
