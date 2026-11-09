@@ -1,7 +1,8 @@
 #include "fetch.hpp"
 
 #include "download_engine.hpp"
-#include "tls_clock.hpp"
+#include "shared_cache.hpp"
+#include "tls.hpp"
 
 #include <curl/curl.h>
 
@@ -46,6 +47,7 @@ FetchResult fetch(const FetchRequest &request)
         return result;
     }
 
+    const Trust trust(request.caFile);
     Transfer transfer;
     transfer.request = &request;
     char errorBuffer[CURL_ERROR_SIZE] = {};
@@ -71,10 +73,8 @@ FetchResult fetch(const FetchRequest &request)
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    useLocalClock(curl);
-    if (!request.caFile.empty()) {
-        curl_easy_setopt(curl, CURLOPT_CAINFO, request.caFile.c_str());
-    }
+    trust.use(curl);
+    curl_easy_setopt(curl, CURLOPT_SHARE, sharedCache());
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, writeCallback);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &transfer);
@@ -156,6 +156,7 @@ Destination whereTo(const FetchRequest &request)
         result.message = "The network library could not start a request.";
         return result;
     }
+    const Trust trust(request.caFile);
     Probe probe;
     probe.request = &request;
     char errorBuffer[CURL_ERROR_SIZE] = {};
@@ -183,10 +184,8 @@ Destination whereTo(const FetchRequest &request)
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    useLocalClock(curl);
-    if (!request.caFile.empty()) {
-        curl_easy_setopt(curl, CURLOPT_CAINFO, request.caFile.c_str());
-    }
+    trust.use(curl);
+    curl_easy_setopt(curl, CURLOPT_SHARE, sharedCache());
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errorBuffer);
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, stopAtFirstByte);
     curl_easy_setopt(curl, CURLOPT_WRITEDATA, &probe);
@@ -226,6 +225,43 @@ Destination whereTo(const FetchRequest &request)
         result.message = describeFailure(static_cast<int>(code), status, errorBuffer);
     }
     return result;
+}
+
+void warmUp(const FetchRequest &request, bool follow)
+{
+    if (follow) {
+        whereTo(request);
+        return;
+    }
+    CURL *curl = curl_easy_init();
+    if (curl == nullptr) {
+        return;
+    }
+    const Trust trust(request.caFile);
+    Probe probe;
+    probe.request = &request;
+    curl_easy_setopt(curl, CURLOPT_URL, request.url.c_str());
+    // Connects, and for https:// shakes hands, without asking for anything.
+    curl_easy_setopt(curl, CURLOPT_CONNECT_ONLY, 1L);
+    curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, request.connectTimeoutSeconds);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, request.totalTimeoutSeconds);
+    curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
+    curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
+    trust.use(curl);
+    curl_easy_setopt(curl, CURLOPT_SHARE, sharedCache());
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, probeProgress);
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &probe);
+    // libcurl asks it once connected, before anything would be sent, as for
+    // any request.
+    if (request.refuse) {
+        curl_easy_setopt(curl, CURLOPT_PREREQFUNCTION, probePrerequest);
+        curl_easy_setopt(curl, CURLOPT_PREREQDATA, &probe);
+    }
+    curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
 }
 
 } // namespace net

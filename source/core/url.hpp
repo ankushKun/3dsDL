@@ -25,6 +25,11 @@ std::string site(const std::string &host);
 // folders and Google Docs. The result is its own answer.
 std::string driveDownload(const std::string &value);
 
+// True for a file of a GitHub release: github.com/<owner>/<repo>/releases/
+// download/<tag>/<name>, or .../releases/latest/download/<name>. Asking for
+// one has no effect on it, unlike a link that works only once.
+bool isGitHubReleaseFile(const std::string &value);
+
 // Last path segment, still percent-encoded, without query or fragment.
 std::string lastPathSegment(const std::string &value);
 

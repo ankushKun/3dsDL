@@ -46,6 +46,7 @@ A Nintendo 3DS homebrew app (C++17, libctru, citro2d) that downloads files, inst
 ## Downloads
 
 - Google Drive links download through `url::driveDownload`, the direct link with Drive's large-file question answered, and a Drive page reached through a redirect restarts the lead once with it. Drive's HTML is never saved as the file.
+- While the confirm screen is up, `tasks::warmUp` readies the link (`net::warmUp`): it only connects, which puts DNS and a TLS session in the shared cache, except a GitHub release file, which it follows to its first byte. Never ask an unknown link for anything before the person says Download, since some links work only once.
 - `download.done` and `.failed` log where the first connection's time went before its first byte: `dnsMs`, `connectMs`, `tlsMs`, `waitMs` and `redirects`.
 
 ## Testing in Azahar
@@ -66,5 +67,5 @@ A Nintendo 3DS homebrew app (C++17, libctru, citro2d) that downloads files, inst
 - A closed lid ends Wi-Fi twice over: sleep turns it off, and even with sleep refused NDM drops the connection for StreetPass unless its infrastructure state is held and locked. Work that has to outlast a closed lid holds an `awake::Hold` (`source/app/awake`), which does both, darkens the screens while the lid is shut and keeps the console up for 30 s after the last hold; `tasks::download`, `extract`, `install` and `fileOperation` already hold one. Never call `aptSetSleepAllowed` directly.
 - Using a new libctru service or hardware block needs `resources/3dsDL.rsf` updated in the same change. Azahar does not enforce the RSF, so a missing entry only crashes the CIA on a console.
 - Azahar has no real system font, so text widths there are not the console's.
-- The console clock holds local time and mbedTLS reads it as UTC. Every curl handle that verifies certificates calls `net::useLocalClock`, so a certificate counts as valid when it is valid in some time zone.
+- Every curl handle that verifies certificates goes through a `net::Trust` (`source/net/tls`) and sets `CURLOPT_SHARE` to `net::sharedCache()`, which keeps DNS answers and TLS sessions for the next request. Trust parses the CA bundle once and lends a parsed copy to one thread at a time, since mbedTLS fills caches in it without locking (built without `MBEDTLS_THREADING_C`). It also counts a certificate valid when it is valid in some time zone, because the console clock holds local time and mbedTLS reads it as UTC.
 - All of the process's socket calls share one network service session, served one request at a time, so a thread waiting inside the service stalls every other thread. The console links `poll()` through `net::pollInSteps` (`-Wl,--wrap=poll`), so it never waits there; keep sockets non-blocking and wait with `poll()`, never in a blocking `recv`, `accept` or `connect`.

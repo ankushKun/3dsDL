@@ -4,6 +4,7 @@
 #include "awake.hpp"
 #include "cia.hpp"
 #include "crash.hpp"
+#include "fetch.hpp"
 #include "logging.hpp"
 #include "sound.hpp"
 #include "ui.hpp"
@@ -325,7 +326,65 @@ void runBusy(void *argument)
     job.finished = true;
 }
 
+struct WarmUp {
+    net::FetchRequest request;
+    bool follow = false;
+    std::atomic<bool> cancel {false};
+    std::atomic<bool> done {false};
+};
+
+// Main thread only.
+WarmUp *warming = nullptr;
+Thread warmingThread = nullptr;
+
+void runWarmUp(void *argument)
+{
+    WarmUp &job = *static_cast<WarmUp *>(argument);
+    const uint64_t began = osGetTime();
+    net::warmUp(job.request, job.follow);
+    logging::trace("warm", {{"host", url::host(job.request.url)},
+                            {"follow", job.follow},
+                            {"stopped", job.cancel.load()},
+                            {"ms", osGetTime() - began}});
+    job.done.store(true);
+}
+
 } // namespace
+
+void warmUp(const std::string &link)
+{
+    stopWarmUp(true);
+    WarmUp *job = new WarmUp;
+    job->request.url = link;
+    job->request.caFile = http::CaBundle;
+    job->request.userAgent = http::UserAgent;
+    job->request.cancel = &job->cancel;
+    job->follow = url::isGitHubReleaseFile(link);
+    warmingThread = startWorkerThread(runWarmUp, job, "warm-up");
+    if (warmingThread == nullptr) {
+        delete job;
+        return;
+    }
+    warming = job;
+}
+
+void stopWarmUp(bool wait)
+{
+    if (warmingThread == nullptr) {
+        return;
+    }
+    warming->cancel.store(true);
+    // One that has ended is freed now, so its stack is not held until the
+    // next.
+    if (!wait && !warming->done.load()) {
+        return;
+    }
+    threadJoin(warmingThread, U64_MAX);
+    threadFree(warmingThread);
+    warmingThread = nullptr;
+    delete warming;
+    warming = nullptr;
+}
 
 Thread startWorker(ThreadFunc entry, void *argument, const char *name)
 {

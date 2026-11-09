@@ -51,6 +51,15 @@ fileops::Result fileOperation(
     const std::string &folder, uint64_t total, bool countsFiles,
     const std::function<fileops::Result(fileops::Observer &)> &work);
 
+// Gets link ready to download while the person decides whether to
+// (net::warmUp): a GitHub release file is followed to its first byte, any
+// other link only connected to, so one that works once still works. One at
+// a time; starting another stops the one before.
+void warmUp(const std::string &link);
+// Stops the warm-up without waiting for it, or with wait until it has
+// ended, which has to happen before the network service goes.
+void stopWarmUp(bool wait = false);
+
 // Starts entry on a worker thread the way every job here runs: on the New
 // 3DS's third core when there is one, otherwise just below the main thread.
 // name, a literal, is the thread's in crash.txt. Returns nullptr when no

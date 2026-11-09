@@ -150,3 +150,19 @@ TEST("url: other links are not Drive files")
     CHECK_EQ(url::driveDownload("https://example.com/uc?id=abc"),
              std::string(""));
 }
+
+TEST("url: GitHub release files")
+{
+    CHECK(url::isGitHubReleaseFile("https://github.com/BolgarMaxym97/3ds-recorder/"
+                                   "releases/download/v0.9.14-beta/3ds-recorder.cia"));
+    CHECK(url::isGitHubReleaseFile("https://GitHub.com/o/r/releases/latest/"
+                                   "download/app.cia?x=1"));
+    CHECK(!url::isGitHubReleaseFile("https://github.com/o/r/releases/tag/v1"));
+    CHECK(!url::isGitHubReleaseFile("https://github.com/o/r/releases/download/v1/"));
+    CHECK(!url::isGitHubReleaseFile("https://github.com/o/r/releases/download/v1"));
+    CHECK(!url::isGitHubReleaseFile("https://github.com/o/r/archive/v1.zip"));
+    CHECK(!url::isGitHubReleaseFile("https://github.com/o/r/releases/download/v1/a/b"));
+    CHECK(!url::isGitHubReleaseFile("https://example.com/o/r/releases/download/v1/a"));
+    CHECK(!url::isGitHubReleaseFile("https://objects.githubusercontent.com/o/r/"
+                                    "releases/download/v1/a"));
+}

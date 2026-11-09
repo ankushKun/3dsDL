@@ -54,4 +54,13 @@ struct Destination {
 };
 Destination whereTo(const FetchRequest &request);
 
+// Gets request.url ready to download while the person decides whether to:
+// its host looked up and, for https://, a TLS session agreed, both kept in
+// sharedCache for the download. Without follow nothing is asked of the
+// server, so a link that works only once still works afterwards. With it,
+// the first byte is asked for as whereTo does, redirects followed, which
+// readies the site they lead to as well and lets a site that is slow to
+// answer a file's first ask (GitHub) answer the download quickly.
+void warmUp(const FetchRequest &request, bool follow);
+
 } // namespace net

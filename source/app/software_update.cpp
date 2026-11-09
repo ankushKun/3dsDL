@@ -105,6 +105,7 @@ App::~App()
     aptUnhook(&aptCookie_);
     ui::setFrameHook(nullptr);
     updater::shutdown();
+    tasks::stopWarmUp(true);
 }
 
 void App::pollUpdate()

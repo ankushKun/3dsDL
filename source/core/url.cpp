@@ -195,6 +195,32 @@ std::string driveDownload(const std::string &value)
     return out;
 }
 
+bool isGitHubReleaseFile(const std::string &value)
+{
+    if (host(value) != "github.com") {
+        return false;
+    }
+    std::vector<std::string> parts;
+    const std::string route = path(value);
+    size_t start = 1;
+    while (start <= route.size()) {
+        const size_t slash = std::min(route.find('/', start), route.size());
+        parts.push_back(route.substr(start, slash - start));
+        start = slash + 1;
+    }
+    if (parts.size() != 6) {
+        return false;
+    }
+    for (const std::string &part : parts) {
+        if (part.empty()) {
+            return false;
+        }
+    }
+    return parts[2] == "releases" &&
+           (parts[3] == "download" ||
+            (parts[3] == "latest" && parts[4] == "download"));
+}
+
 std::string lastPathSegment(const std::string &value)
 {
     const std::string route = path(value);

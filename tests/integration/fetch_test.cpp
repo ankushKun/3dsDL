@@ -139,3 +139,58 @@ TEST("fetch: whereTo follows redirects as a download would")
     request.cancel = &cancel;
     CHECK(net::whereTo(request).cancelled);
 }
+
+namespace {
+
+long requestsSoFar()
+{
+    net::FetchRequest request;
+    request.url = fixture("FIXTURE_HTTP") + "/requests";
+    const net::FetchResult result = net::fetch(request);
+    json::Value value;
+    std::string error;
+    if (!result.ok || !json::parse(result.body, value, error)) {
+        return -1;
+    }
+    return static_cast<long>(value["count"].integer(-1));
+}
+
+} // namespace
+
+TEST("fetch: later requests resume the TLS session of earlier ones")
+{
+    net::FetchRequest request;
+    request.url = fixture("FIXTURE_HTTPS") + "/tls";
+    request.caFile = fixture("FIXTURE_CERT");
+    CHECK(net::fetch(request).ok);
+    const net::FetchResult again = net::fetch(request);
+    json::Value value;
+    std::string error;
+    CHECK(again.ok && json::parse(again.body, value, error));
+    CHECK(value["reused"].boolean);
+}
+
+TEST("fetch: a warm-up asks for nothing unless it follows the link")
+{
+    net::FetchRequest request;
+    request.url = fixture("FIXTURE_HTTPS") + "/file/1000";
+    request.caFile = fixture("FIXTURE_CERT");
+    const long before = requestsSoFar();
+    CHECK(before >= 0);
+    net::warmUp(request, false);
+    CHECK_EQ(requestsSoFar(), before);
+
+    // Following asks for the first byte, through each redirect.
+    request.url = fixture("FIXTURE_HTTP") + "/redirect/2";
+    net::warmUp(request, true);
+    CHECK_EQ(requestsSoFar(), before + 3);
+
+    // An address the rule turns away is connected to but never asked.
+    request.url = fixture("FIXTURE_HTTP") + "/file/1000";
+    request.refuse = [](const std::string &, const std::string &) {
+        return true;
+    };
+    net::warmUp(request, false);
+    net::warmUp(request, true);
+    CHECK_EQ(requestsSoFar(), before + 3);
+}

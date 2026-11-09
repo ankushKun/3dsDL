@@ -3,8 +3,9 @@
 #include "fs_util.hpp"
 #include "naming.hpp"
 #include "records.hpp"
+#include "shared_cache.hpp"
 #include "text.hpp"
-#include "tls_clock.hpp"
+#include "tls.hpp"
 #include "units.hpp"
 #include "url.hpp"
 
@@ -86,7 +87,7 @@ struct Transfer {
     const Request *request = nullptr;
     Observer *observer = nullptr;
     CURLM *multi = nullptr;
-    CURLSH *share = nullptr;
+    const Trust *trust = nullptr;
     FILE *file = nullptr;
     std::string address; // the link asked for, which names the partial files
     std::string url;     // what the lead requests for it
@@ -574,13 +575,10 @@ void configure(Transfer &transfer, Connection &connection)
     curl_easy_setopt(curl, CURLOPT_HTTP_VERSION, CURL_HTTP_VERSION_1_1);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);
-    useLocalClock(curl);
-    if (!request.caFile.empty()) {
-        curl_easy_setopt(curl, CURLOPT_CAINFO, request.caFile.c_str());
-    }
-    // Shares DNS answers and TLS sessions, so later connections skip most
-    // of the handshake.
-    curl_easy_setopt(curl, CURLOPT_SHARE, transfer.share);
+    transfer.trust->use(curl);
+    // DNS answers and TLS sessions, so later connections skip most of the
+    // handshake, this download's and those of what comes after it.
+    curl_easy_setopt(curl, CURLOPT_SHARE, sharedCache());
     curl_easy_setopt(curl, CURLOPT_PRIVATE, &connection);
     curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, connection.errorBuffer);
     curl_easy_setopt(curl, CURLOPT_BUFFERSIZE, CurlBufferSize);
@@ -929,6 +927,8 @@ Result download(const Request &request, Observer &observer)
     const PartialPaths paths = partialPaths(normalised.folder, address);
     const std::string drive = url::driveDownload(address);
     std::string lead = drive.empty() ? address : drive;
+    // Every connection of every attempt runs on this thread.
+    const Trust trust(normalised.caFile);
 
     bool allowSplit = true;
     bool mayResume = true;
@@ -936,6 +936,7 @@ Result download(const Request &request, Observer &observer)
         Transfer transfer;
         transfer.request = &normalised;
         transfer.observer = &observer;
+        transfer.trust = &trust;
         transfer.address = address;
         transfer.url = lead;
         transfer.paths = paths;
@@ -978,13 +979,6 @@ Result download(const Request &request, Observer &observer)
             : 0;
 
         transfer.multi = curl_multi_init();
-        transfer.share = curl_share_init();
-        if (transfer.share != nullptr) {
-            curl_share_setopt(transfer.share, CURLSHOPT_SHARE,
-                              CURL_LOCK_DATA_DNS);
-            curl_share_setopt(transfer.share, CURLSHOPT_SHARE,
-                              CURL_LOCK_DATA_SSL_SESSION);
-        }
         const uint64_t resumedBytes = receivedBytes(transfer);
         if (transfer.resuming) {
             observer.onResumed(resumedBytes);
@@ -996,10 +990,9 @@ Result download(const Request &request, Observer &observer)
                 break;
             }
         }
-        if (transfer.multi == nullptr || transfer.share == nullptr ||
+        if (transfer.multi == nullptr ||
             (first != nullptr && !open(transfer, *first, true))) {
             curl_multi_cleanup(transfer.multi);
-            curl_share_cleanup(transfer.share);
             std::fclose(transfer.file);
             if (!transfer.resuming) {
                 fs::removeFile(paths.data);
@@ -1011,7 +1004,6 @@ Result download(const Request &request, Observer &observer)
             run(transfer);
         }
         curl_multi_cleanup(transfer.multi);
-        curl_share_cleanup(transfer.share);
         const bool closed = std::fclose(transfer.file) == 0;
 
         result.httpStatus = transfer.httpStatus;

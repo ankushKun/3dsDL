@@ -359,7 +359,10 @@ App::Start App::startDownload(const std::string &address, std::string folder)
                     ui::Tone::Error, link);
         return Start::Cancelled;
     }
+    // The host is looked up and shaken hands with while the person reads.
+    tasks::warmUp(link);
     const Confirm confirmed = confirmDownload(link, folder);
+    tasks::stopWarmUp();
     if (confirmed == Confirm::Queue) {
         addToQueue({link}, folder, true);
         return Start::Queued;

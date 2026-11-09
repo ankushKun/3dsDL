@@ -17,8 +17,9 @@ controlled by query parameters:
   key=<name>        identifies a test for drop_at / stall_at / etag=changing
 
 Other endpoints: /chunked/<size>, /redirect/<count>, /redirect-ftp,
-/status/<code>, /empty, /huge, /release/<tag> (a GitHub-style release) and
-/headers (the request's headers as JSON).
+/status/<code>, /empty, /huge, /release/<tag> (a GitHub-style release),
+/headers (the request's headers as JSON), /tls (whether this connection
+resumed a TLS session) and /requests (how many requests came before it).
 
 It also runs three fake NTP servers on UDP: "good" answers with
 NTP_FIXED_UNIX, "unsynced" claims stratum 0, and "mismatched" answers with
@@ -44,6 +45,7 @@ NTP_TO_UNIX = 2208988800
 _state_lock = threading.Lock()
 _first_request_done = set()
 _request_counts = {}
+_requests = 0
 
 
 def pattern_byte(index):
@@ -100,6 +102,16 @@ class Handler(BaseHTTPRequestHandler):
         query = {k: v[-1] for k, v in parse_qs(parsed.query).items()}
         parts = [p for p in parsed.path.split("/") if p]
 
+        global _requests
+        if parts == ["requests"]:
+            with _state_lock:
+                count = _requests
+            return self.json_body({"count": count})
+        with _state_lock:
+            _requests += 1
+        if parts == ["tls"]:
+            reused = getattr(self.connection, "session_reused", False)
+            return self.json_body({"reused": bool(reused)})
         if parts[:1] == ["file"] and len(parts) == 2:
             return self.file(int(parts[1]), query)
         if parts[:1] == ["chunked"] and len(parts) == 2:
@@ -306,7 +318,10 @@ def main():
     http_server = QuietServer(("127.0.0.1", 0), Handler)
     https_server = QuietServer(("127.0.0.1", 0), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    # TLS 1.2 only, as the console's mbedTLS speaks it, which is also the
+    # version macOS's libcurl resumes sessions in.
     context.minimum_version = ssl.TLSVersion.TLSv1_2
+    context.maximum_version = ssl.TLSVersion.TLSv1_2
     context.load_cert_chain(args.cert, args.key)
     https_server.socket = context.wrap_socket(https_server.socket,
                                               server_side=True)
