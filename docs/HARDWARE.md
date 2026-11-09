@@ -259,10 +259,10 @@ with a few hundred files.
     closed, and the file's SHA-256 matches. Note the speed.
 58b2. Upload a folder of a few thousand small files from a computer and close
     the lid partway (issue #13): every file arrives, as one row for the
-    folder, the screens light when
-    the lid opens, and with the lid left closed the console sleeps about
-    30 s after the last file. Leave the page open and idle with the lid
-    closed: the console still sleeps (the status poll does not count).
+    folder, and the screens light when the lid opens. Leave Receive open
+    and idle with the lid closed for a few minutes: the screens stay dark,
+    the page still lists folders and takes an upload, and log.txt has
+    lid.closed working=yes network=yes. Leaving Receive lets it sleep.
 58c. With Offer to Install ticked, uploading two CIAs asks once on the
     console and installs both.
 58d. Download, rename, move, delete and edit a text file from the page, and

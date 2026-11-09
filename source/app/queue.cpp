@@ -34,7 +34,6 @@
 #include <deque>
 #include <initializer_list>
 #include <memory>
-#include <optional>
 #include <map>
 #include <set>
 
@@ -111,10 +110,6 @@ struct ReceiveJob {
     std::deque<net::Transfer> reports;
     std::deque<std::string> changed;
     net::ConsoleStatus status;
-    // Requests being served, all but the page's status poll, and how many
-    // have started, so one that comes and goes between frames counts too.
-    std::atomic<int> requests {0};
-    std::atomic<uint32_t> started {0};
 
     ReceiveJob() { LightLock_Init(&lock); }
 
@@ -1154,14 +1149,6 @@ void App::receiveScreen()
         job.progress(transfer);
     };
     sharing.changed = [&job](const std::string &path) { job.pathChanged(path); };
-    sharing.working = [&job](bool starting) {
-        if (starting) {
-            ++job.requests;
-            ++job.started;
-        } else {
-            --job.requests;
-        }
-    };
     // Room for the network to keep filling while an upload's last piece is
     // written to the SD card, so the sender is not told to wait.
     sharing.socketBufferSize = 128 * 1024;
@@ -1219,8 +1206,10 @@ void App::receiveScreen()
     bool nameSettled = false;
     std::string hostname; // for log.txt, once settled
 
-    std::optional<awake::Hold> keptAwake;
-    uint32_t requestsSeen = 0;
+    // Awake, and Wi-Fi held, for as long as Receive is open: a closed lid
+    // only darkens the screens, so the page still reaches the console
+    // between transfers, not only during one.
+    const awake::Hold keptAwake;
     // The newest report, for the top screen, which shows a finished file a
     // moment longer so a batch does not flicker between its files.
     net::Transfer current;
@@ -1283,19 +1272,6 @@ void App::receiveScreen()
     // Someone using the page holds the console awake, and the linger after
     // each request covers the gap before the next, so closing the lid never
     // cuts a batch off between files (issue #13).
-    const auto holdAwake = [&]() {
-        const uint32_t started = job.started.load();
-        const bool inUse = job.requests.load() > 0 || started != requestsSeen;
-        requestsSeen = started;
-        if (inUse != keptAwake.has_value()) {
-            if (keptAwake) {
-                keptAwake.reset();
-            } else {
-                keptAwake.emplace();
-            }
-        }
-    };
-
     const auto askAbout = [&](const ReceiveJob::Asker &asker) {
         const std::string who = whoIs(asker.device, asker.from);
         ui::Dialog dialog;
@@ -1858,7 +1834,6 @@ void App::receiveScreen()
             named = "http://" + hostname + port;
             nameSettled = true;
         }
-        holdAwake();
         takeReports();
         ReceiveJob::Asker asker;
         net::Received received;
