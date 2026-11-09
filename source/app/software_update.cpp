@@ -303,6 +303,8 @@ void App::showReleaseNotes(const update::Release &release)
     // holding it glides on; both ease there rather than jump.
     float target = 0;
     bool gliding = false;
+    // Only a press made here glides, not one held from the screen before.
+    bool pressed = false;
     uint64_t heldSince = 0;
     bool backPressed = false;
     const ui::Rect back = ui::tabRect(ui::Tab::Left);
@@ -326,12 +328,16 @@ void App::showReleaseNotes(const update::Release &release)
             return std::max(0.0f, std::min(maxOffset, value));
         };
         const u32 dpad = KEY_DOWN | KEY_UP;
+        if (!(input.held & dpad)) {
+            pressed = false;
+        }
         if (input.down & dpad) {
             target = clamp((gliding ? target : scroller.offset()) +
                            ((input.down & KEY_DOWN) ? pitch * 3 : -pitch * 3));
             heldSince = ui::now();
+            pressed = true;
             gliding = true;
-        } else if ((input.held & dpad) && ui::now() - heldSince > 300) {
+        } else if (pressed && (input.held & dpad) && ui::now() - heldSince > 300) {
             target = clamp(target + ((input.held & KEY_DOWN) ? 6.0f : -6.0f));
             gliding = true;
         }
