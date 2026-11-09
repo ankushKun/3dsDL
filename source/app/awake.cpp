@@ -280,6 +280,11 @@ void update()
     light(!closed);
 }
 
+bool isLidClosed()
+{
+    return lidClosed;
+}
+
 void lightScreens()
 {
     if (dark.load() && lcd) {

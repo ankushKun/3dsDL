@@ -5,6 +5,7 @@
 #include "cia.hpp"
 #include "crash.hpp"
 #include "fetch.hpp"
+#include "led.hpp"
 #include "logging.hpp"
 #include "sound.hpp"
 #include "ui.hpp"
@@ -405,6 +406,8 @@ bool busy(const std::string &header, const std::string &title,
 {
     BusyJob job;
     job.work = &work;
+    // Work for the LED, but with no outcome: the screen after it says that.
+    const led::Job working;
     const uint64_t started = osGetTime();
     units::RateMeter meter;
     const auto logged = [&]() {
@@ -488,6 +491,7 @@ net::Result download(const net::Request &request,
     job.installStarted = std::move(installStarted);
 
     awake::Hold hold;
+    const led::Job working;
     Thread thread = startWorkerThread(runDownload, &job, "download");
     if (thread == nullptr) {
         job.result.message = "Could not start the download thread.";
@@ -573,6 +577,9 @@ net::Result download(const net::Request &request,
                 {"http", result.httpStatus},
                 {"curl", result.curlCode},
                 {"message", result.message}});
+    if (result.outcome != net::Outcome::Cancelled) {
+        led::finished(result.outcome == net::Outcome::Completed);
+    }
     return job.result;
 }
 
@@ -608,6 +615,7 @@ archives::Result extract(const std::string &path,
     const uint64_t totalWork = totalBytes + totalFiles * FileWeight;
 
     awake::Hold hold;
+    const led::Job working;
     Thread thread = startWorkerThread(runExtract, &job, "extract");
     if (thread == nullptr) {
         job.result.message = "Could not start the extraction thread.";
@@ -693,6 +701,9 @@ archives::Result extract(const std::string &path,
                                ? std::to_string(result.skippedPlaced)
                                : std::string()},
                 {"message", result.message}});
+    if (!result.cancelled) {
+        led::finished(result.ok);
+    }
     return job.result;
 }
 
@@ -706,6 +717,7 @@ installer::Result install(const std::string &path, uint64_t titleId,
     job.commit = commit;
 
     awake::Hold hold;
+    const led::Job working;
     Thread thread = startWorkerThread(runInstall, &job, "install");
     if (thread == nullptr) {
         job.result.message = "Could not start the install thread.";
@@ -757,6 +769,12 @@ installer::Result install(const std::string &path, uint64_t titleId,
                 {"olderOrSame", result.versionRefused},
                 {"compressed", result.compressed},
                 {"message", result.message}});
+    // A refused version is often asked about and tried again after removing
+    // the installed one; when it stays refused, the dialog that says so
+    // reports it.
+    if (result.outcome != installer::Outcome::Cancelled && !result.versionRefused) {
+        led::finished(result.outcome == installer::Outcome::Installed);
+    }
     return job.result;
 }
 
@@ -770,6 +788,7 @@ fileops::Result fileOperation(
     job.total = total;
 
     awake::Hold hold;
+    const led::Job working;
     Thread thread = startWorkerThread(runFileJob, &job, "files");
     if (thread == nullptr) {
         job.result.status = fileops::Status::Failed;
@@ -823,6 +842,9 @@ fileops::Result fileOperation(
                 {"bytes", countsFiles ? 0 : job.done},
                 {"ms", osGetTime() - started},
                 {"message", job.result.message}});
+    if (job.result.status != fileops::Status::Cancelled) {
+        led::finished(job.result.status == fileops::Status::Ok);
+    }
     return job.result;
 }
 

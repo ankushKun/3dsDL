@@ -2,6 +2,7 @@
 
 #include "crash.hpp"
 #include "image.hpp"
+#include "led.hpp"
 #include "logging.hpp"
 #include "platform.hpp"
 #include "sound.hpp"
@@ -11,6 +12,7 @@
 #include "stb_image.h"
 
 #include <algorithm>
+#include <optional>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -2611,6 +2613,16 @@ int choose(const Dialog &dialog)
         dialog.buttons.empty() ? std::vector<std::string>{"OK"}
                                : dialog.buttons;
     const int count = static_cast<int>(labels.size());
+    // For the LED while the lid is closed: a choice is a question waiting,
+    // and a lone OK closes a result, which says how it went by its tone.
+    std::optional<led::Asking> asking;
+    if (count > 1) {
+        asking.emplace();
+    } else if (dialog.tone == Tone::Success) {
+        led::finished(true);
+    } else if (dialog.tone == Tone::Error || dialog.tone == Tone::Warning) {
+        led::finished(false);
+    }
     // A dangerous choice between two gets the system's red button, with
     // the other choice on a dark strip under it.
     const bool redLayout = dialog.dangerous >= 0 && count == 2;

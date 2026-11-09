@@ -145,6 +145,8 @@ AccessControlInfo:
     # Starting .3dsx files through Luma3DS's homebrew loader.
     - hb:ldr
     - hid:USER
+    # The notification LED says how work goes while the lid is closed.
+    - mcu::HWC
     - ndm:u
     - ptm:u
     - ptm:sysm

@@ -225,6 +225,27 @@ on its top right corner, drawn over the focus ring.
   scrolls the rest on its last line. In lists only the highlighted row
   scrolls, as on the system's lists; the others keep "...".
 
+### Notification LED
+
+With the lid closed, when nobody can see the screens, the notification LED
+says how 3dsDL's work is going. With the lid open it stays off, and opening
+it clears what it said.
+
+| Shows | When | Pattern |
+| --- | --- | --- |
+| Amber | a question waits on the console (Allow, Install, Replace) | on half a second, off half a second |
+| Blue | a download, install, extraction, file job, busy task or Receive transfer runs | one slow breath every 3 s, never dark |
+| Green | everything that ended since the lid closed went through | two soft pulses, then dark, every 3.5 s |
+| Red | something that ended since the lid closed did not | three short blinks, then dark, every 2.5 s |
+
+A question comes first, then work, then how it went; one failure stays red
+over later successes until the lid opens, so a batch left alone says if
+any of it went wrong. Red never blinks steadily, as the battery warning
+does on this LED and the power LED together. 3dsDL writes a pattern only
+when what it shows changes, so a SpotPass or StreetPass notice stays until
+there is something of its own to show, and clears its own when the HOME
+Menu takes over or it closes.
+
 ## How the code draws it
 
 `source/app/ui.cpp` is the toolkit; every screen uses it.

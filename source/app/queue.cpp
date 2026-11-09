@@ -9,6 +9,7 @@
 #include "finalize.hpp"
 #include "fs_util.hpp"
 #include "installer.hpp"
+#include "led.hpp"
 #include "logging.hpp"
 #include "mdns.hpp"
 #include "mdns_responder.hpp"
@@ -1144,6 +1145,9 @@ void App::receiveScreen()
         job.progress(transfer);
     };
     sharing.changed = [&job](const std::string &path) { job.pathChanged(path); };
+    // Each request but the status poll is work for the LED, on the server's
+    // thread.
+    sharing.working = [](bool starting) { led::working(starting); };
     // Room for the network to keep filling while an upload's last piece is
     // written to the SD card, so the sender is not told to wait.
     sharing.socketBufferSize = 128 * 1024;
@@ -1245,6 +1249,9 @@ void App::receiveScreen()
                 ++filesOut;
             } else if (report.finished) {
                 ++failed;
+            }
+            if (report.finished) {
+                led::finished(report.ok);
             }
             receiveLog_.transfer(report, now);
         }

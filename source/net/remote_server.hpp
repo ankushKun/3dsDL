@@ -116,7 +116,8 @@ struct FileSharing {
     std::function<void(const std::string &path)> changed;
     // Called with true as a request starts and false as it ends, on the
     // server's thread, for every request but the page's status poll, which
-    // runs for as long as the page is open.
+    // runs for as long as the page is open. The app shows them on the
+    // notification LED.
     std::function<void(bool)> working;
     int socketBufferSize = 0; // asked for on each connection when not 0
     // Where uploads are written until they are complete, then moved into

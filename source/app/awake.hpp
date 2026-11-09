@@ -25,6 +25,9 @@ public:
 // sleep once the linger is over (at once if the lid is closed).
 void update();
 
+// Whether the lid was closed when last read, for the notification LED.
+bool isLidClosed();
+
 // Lights the screens again if 3dsDL turned them off, for an error screen.
 // Safe from any thread.
 void lightScreens();

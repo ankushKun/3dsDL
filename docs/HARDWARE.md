@@ -67,6 +67,14 @@ and (on New 3DS) CPU speed.
     on Wi-Fi for as long as 3dsDL is open, screens dark (log.txt:
     lid.closed working=yes network=yes, lid.opened); closing 3dsDL lets it
     sleep. Run a queue of three with the lid closed: all three finish.
+14a. The notification LED, lid closed (#34): a download breathes blue; when
+    it finishes it pulses green twice every few seconds, and a failed one
+    (a dead link) blinks red three times instead; a queue with one bad link
+    ends red. A question on the console (Receive's Allow, Install from the
+    page) blinks amber. Opening the lid turns it off; a SpotPass or
+    StreetPass light from before is not cleared until 3dsDL has something to
+    show, and pressing HOME or closing 3dsDL clears 3dsDL's. The CIA build
+    can drive it (mcu::HWC in the RSF), and so can the .3dsx.
 15. Use `drop_at` on the fixture server with a file under 1 MiB, which uses
     one connection: the failure says the connection dropped and RETRY
     continues from the partial size ("Continuing from…"). With a larger file

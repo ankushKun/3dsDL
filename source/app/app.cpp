@@ -6,6 +6,7 @@
 #include "finalize.hpp"
 #include "fs_util.hpp"
 #include "installer.hpp"
+#include "led.hpp"
 #include "library.hpp"
 #include "logging.hpp"
 #include "naming.hpp"
@@ -179,6 +180,7 @@ App::App()
     startIndexLoad();
     ui::setFrameHook([this]() {
         awake::update();
+        led::update(awake::isLidClosed());
         pollUpdate();
         pollLibrary();
         pollIndex();

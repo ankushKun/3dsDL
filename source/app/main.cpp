@@ -2,6 +2,7 @@
 #include "awake.hpp"
 #include "crash.hpp"
 #include "installer.hpp"
+#include "led.hpp"
 #include "logging.hpp"
 #include "sound.hpp"
 #include "ui.hpp"
@@ -80,6 +81,7 @@ struct Services {
         sound::init();
 
         awake::init();
+        led::init();
 
         const CURLcode code = curl_global_init(CURL_GLOBAL_DEFAULT);
         if (code != CURLE_OK) {
@@ -93,6 +95,7 @@ struct Services {
 
     ~Services()
     {
+        led::exit();
         awake::exit();
         sound::exit();
         installer::exit();
