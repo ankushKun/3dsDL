@@ -216,6 +216,10 @@ with a few hundred files.
     will not export, is named (installed once, a Checkpoint folder or its
     CIA on the card) and asked about with Delete Anyway / Keep; Keep leaves
     it, Delete Anyway logs it in tickets/deleted/log.txt.
+50a. With about 20 leftover homebrew CIA tickets (#38), Delete Unused
+    Tickets reaches Delete Anyway / Keep within seconds, and log.txt has a
+    tickets.personal line with its ms. B stops "Looking at the tickets..."
+    and keeps them, and HOME, Close works while it runs.
 51. Interrupt a CIA install (cancel it, or pull the power in a test), then
     Clean Up shows an unfinished install; Remove Unfinished Installs clears
     it and the CIA installs again.

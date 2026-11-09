@@ -12,6 +12,7 @@
 #include "units.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <map>
 #include <set>
@@ -793,7 +794,8 @@ struct FoundCia {
     std::string name;
 };
 
-std::map<uint64_t, FoundCia> ciasOnCard(const std::string &downloadFolder)
+std::map<uint64_t, FoundCia> ciasOnCard(const std::string &downloadFolder,
+                                        const std::atomic<bool> &stop)
 {
     std::map<uint64_t, FoundCia> found;
     std::set<std::string> seen;
@@ -802,6 +804,9 @@ std::map<uint64_t, FoundCia> ciasOnCard(const std::string &downloadFolder)
             continue;
         }
         for (const fs::Entry &entry : fs::listEntries(folder, nullptr, false, false)) {
+            if (stop.load()) {
+                return found;
+            }
             if (entry.folder || !text::endsWithNoCase(entry.name, ".cia")) {
                 continue;
             }
@@ -839,7 +844,8 @@ std::string App::softwareName(uint64_t titleId, const titles::Index &index,
 }
 
 bool App::confirmUnsavedTickets(const std::vector<uint64_t> &tickets,
-                                const std::string &why)
+                                const std::string &why,
+                                std::map<uint64_t, library::TicketFacts> &shown)
 {
     struct Known {
         uint64_t id = 0;
@@ -848,25 +854,41 @@ bool App::confirmUnsavedTickets(const std::vector<uint64_t> &tickets,
         std::string cia; // a CIA that brings it back, or ""
     };
     std::vector<Known> known;
-    tasks::busy("Tickets", "Looking at the tickets...", [&]() {
-        const titles::Index index = titles::indexOf(library_.titles);
-        const std::vector<std::string> folders = checkpointFolders();
-        const std::map<uint64_t, FoundCia> cias = ciasOnCard(settings_.destination);
-        for (const uint64_t id : tickets) {
-            Known ticket;
-            ticket.id = id;
-            ticket.name = softwareName(id, index, folders);
-            ticket.facts = library::ticketFacts(id);
-            const auto cia = cias.find(id);
-            if (cia != cias.end()) {
-                ticket.cia = cia->second.path;
-                if (ticket.name.empty()) {
-                    ticket.name = cia->second.name;
+    shown.clear();
+    // Reading which tickets were bought here goes through every ticket, so
+    // it is read once for all of them. Only reads, so it can stop.
+    const bool looked = tasks::busy(
+        "Tickets", "Looking at the tickets...",
+        [&](tasks::Busy &busy) {
+            busy.total = tickets.size();
+            const titles::Index index = titles::indexOf(library_.titles);
+            const std::vector<std::string> folders = checkpointFolders();
+            const std::set<uint64_t> personal = library::personalTickets();
+            const std::map<uint64_t, FoundCia> cias =
+                ciasOnCard(settings_.destination, busy.cancel);
+            for (const uint64_t id : tickets) {
+                if (busy.cancel.load()) {
+                    return;
                 }
+                Known ticket;
+                ticket.id = id;
+                ticket.name = softwareName(id, index, folders);
+                ticket.facts = library::ticketFacts(id, personal);
+                const auto cia = cias.find(id);
+                if (cia != cias.end()) {
+                    ticket.cia = cia->second.path;
+                    if (ticket.name.empty()) {
+                        ticket.name = cia->second.name;
+                    }
+                }
+                known.push_back(ticket);
+                busy.done.fetch_add(1);
             }
-            known.push_back(ticket);
-        }
-    });
+        },
+        true);
+    if (!looked || known.size() != tickets.size()) {
+        return false;
+    }
     size_t bought = 0;
     for (const Known &ticket : known) {
         bought += ticket.facts.personal ? 1 : 0;
@@ -926,7 +948,13 @@ bool App::confirmUnsavedTickets(const std::vector<uint64_t> &tickets,
         }
         ui::drawFacts(facts);
     };
-    return ui::choose(dialog) == 0;
+    if (ui::choose(dialog) != 0) {
+        return false;
+    }
+    for (const Known &ticket : known) {
+        shown[ticket.id] = ticket.facts;
+    }
+    return true;
 }
 
 void App::ticketsScreen()
@@ -1059,10 +1087,12 @@ void App::ticketsScreen()
         if (!library::deleteTicket(ticket, error, &unsaved)) {
             // One the console will not export can still go, once the
             // person has seen what it is.
+            std::map<uint64_t, library::TicketFacts> shown;
             if (!unsaved) {
                 ui::message("Not Deleted", error, ui::Tone::Error);
-            } else if (confirmUnsavedTickets({ticket}, error) &&
-                       !library::deleteTicket(ticket, error, nullptr, true)) {
+            } else if (confirmUnsavedTickets({ticket}, error, shown) &&
+                       !library::deleteTicket(ticket, error, nullptr,
+                                              &shown[ticket])) {
                 ui::message("Not Deleted", error, ui::Tone::Error);
             }
         }
@@ -1120,14 +1150,16 @@ void App::deleteUnusedTickets()
         },
         false);
     // Asked once for all of them, with what each was.
-    if (!unsaved.empty() && confirmUnsavedTickets(unsaved, unsavedWhy)) {
+    std::map<uint64_t, library::TicketFacts> shown;
+    if (!unsaved.empty() && confirmUnsavedTickets(unsaved, unsavedWhy, shown)) {
         tasks::busy(
             "Delete", "Deleting tickets without a backup...",
             [&](tasks::Busy &busy) {
                 busy.total = unsaved.size();
                 for (const uint64_t ticket : unsaved) {
                     if (!library::installedAnywhere(ticket) &&
-                        library::deleteTicket(ticket, error, nullptr, true)) {
+                        library::deleteTicket(ticket, error, nullptr,
+                                              &shown[ticket])) {
                         ++deleted;
                     }
                     busy.done.fetch_add(1);

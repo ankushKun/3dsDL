@@ -127,14 +127,6 @@ bool installedAnywhere(uint64_t titleId);
 // needs, for deleting them. Fails, and returns none, when any part cannot
 // be read or the sources disagree, rather than guessing.
 bool checkUnusedTickets(std::vector<uint64_t> &unused, std::string &error);
-// Saves the ticket to DeletedTicketsFolder, then deletes it. Nothing is
-// deleted when it cannot be saved, and unsaved, when given, then says that
-// was the reason. withoutBackup deletes it without saving it, for when a
-// person was shown that it cannot be and said yes; what it was goes in the
-// folder's log.
-bool deleteTicket(uint64_t titleId, std::string &error, bool *unsaved = nullptr,
-                  bool withoutBackup = false);
-
 // What the console says about a title's ticket, for the question before
 // deleting one that cannot be saved first.
 struct TicketFacts {
@@ -143,7 +135,18 @@ struct TicketFacts {
     uint16_t version = 0;  // the title version it was issued for
     bool personal = false; // issued to this console: bought on its eShop
 };
-TicketFacts ticketFacts(uint64_t titleId);
+// The title IDs of the tickets issued to this console. AM reads every
+// ticket for this, which takes seconds, so ask once for many tickets.
+std::set<uint64_t> personalTickets();
+TicketFacts ticketFacts(uint64_t titleId, const std::set<uint64_t> &personal);
+
+// Saves the ticket to DeletedTicketsFolder, then deletes it. Nothing is
+// deleted when it cannot be saved, and unsaved, when given, then says that
+// was the reason. withoutBackup, the facts a person was shown about one
+// that cannot be saved before saying yes, deletes it without saving it;
+// they go in the folder's log.
+bool deleteTicket(uint64_t titleId, std::string &error, bool *unsaved = nullptr,
+                  const TicketFacts *withoutBackup = nullptr);
 // How many deleted tickets are saved, and putting them all back; restored
 // copies are removed. Returns how many were restored.
 size_t deletedTicketCount();

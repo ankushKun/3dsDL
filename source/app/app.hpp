@@ -17,6 +17,7 @@
 #include <atomic>
 #include <deque>
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -215,9 +216,12 @@ private:
                              const std::vector<std::string> &folders) const;
     // Asks whether to delete tickets that cannot be saved first, showing
     // what each belonged to, whether it was bought on this console and a CIA
-    // that would bring it back. True for yes.
+    // that would bring it back. True for yes, with what was shown about each
+    // in shown, for library::deleteTicket's log. Stopping the look at them
+    // counts as no.
     bool confirmUnsavedTickets(const std::vector<uint64_t> &tickets,
-                               const std::string &why);
+                               const std::string &why,
+                               std::map<uint64_t, library::TicketFacts> &shown);
     void cleanUpScreen();
     void importSeeds();
 

@@ -769,7 +769,32 @@ bool installTicketData(const std::string &data, std::string &error)
 
 } // namespace
 
-TicketFacts ticketFacts(uint64_t titleId)
+std::set<uint64_t> personalTickets()
+{
+    std::set<uint64_t> ids;
+    // No more can be issued to this console than there are tickets.
+    u32 total = 0;
+    if (R_FAILED(AM_GetTicketCount(&total)) || total == 0) {
+        return ids;
+    }
+    std::vector<AM_TicketInfo> infos(total);
+    u32 count = 0;
+    const uint64_t started = osGetTime();
+    const ::Result code = AM_GetPersonalizedTicketInfos(&count, infos.data(), total);
+    if (R_SUCCEEDED(code)) {
+        for (u32 index = 0; index < count && index < total; ++index) {
+            ids.insert(infos[index].titleId);
+        }
+    }
+    // How long AM takes over this, which once ran per ticket (issue #38).
+    logging::info("tickets.personal", {{"tickets", total},
+                                       {"personal", ids.size()},
+                                       {"code", eventlog::hex(static_cast<uint32_t>(code))},
+                                       {"ms", osGetTime() - started}});
+    return ids;
+}
+
+TicketFacts ticketFacts(uint64_t titleId, const std::set<uint64_t> &personal)
 {
     TicketFacts facts;
     AM_TicketInfo info {};
@@ -780,19 +805,12 @@ TicketFacts ticketFacts(uint64_t titleId)
         facts.ticketId = info.ticketId;
         facts.version = info.titleVersion;
     }
-    std::vector<AM_TicketInfo> personal(512);
-    count = 0;
-    if (R_SUCCEEDED(AM_GetPersonalizedTicketInfos(
-            &count, personal.data(), static_cast<u32>(personal.size())))) {
-        for (u32 index = 0; index < count && index < personal.size(); ++index) {
-            facts.personal = facts.personal || personal[index].titleId == titleId;
-        }
-    }
+    facts.personal = personal.count(titleId) != 0;
     return facts;
 }
 
 bool deleteTicket(uint64_t titleId, std::string &error, bool *unsaved,
-                  bool withoutBackup)
+                  const TicketFacts *withoutBackup)
 {
     if (unsaved != nullptr) {
         *unsaved = false;
@@ -808,8 +826,8 @@ bool deleteTicket(uint64_t titleId, std::string &error, bool *unsaved,
     // Saved first, so a deleted ticket can always be put back. No copy, no
     // delete.
     std::string backup = "nothing (test fault)";
-    if (withoutBackup) {
-        const TicketFacts facts = ticketFacts(titleId);
+    if (withoutBackup != nullptr) {
+        const TicketFacts &facts = *withoutBackup;
         backup = std::string("ticket ") +
                  (facts.known ? std::to_string(facts.ticketId) : "unknown") +
                  ", version " + std::to_string(facts.version) +
@@ -829,7 +847,8 @@ bool deleteTicket(uint64_t titleId, std::string &error, bool *unsaved,
         return false;
     }
     logTickets("deleted " + cia::titleIdText(titleId) +
-               (withoutBackup ? " without a backup: " : ", saved as ") + backup);
+               (withoutBackup != nullptr ? " without a backup: " : ", saved as ") +
+               backup);
     return true;
 }
 
