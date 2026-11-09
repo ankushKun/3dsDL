@@ -117,8 +117,9 @@ first guess is cap 15 at scale 0.72.
   view, pictures) use the whole area below the title row instead.
 - Shoulder keys, y 225 to 240: when L or R has a job, a small grey tab
   in the corner nearest its button names it, built as the nav tabs are:
-  flush with the screen's edges, its inner top corner rounded, the key's
-  white cap on the outside. A key that goes somewhere takes a word (Files:
+  flush with the screen's edges, its inner top corner rounded, the key on
+  the outside as HOME Menu draws L and R: the button's white outline with
+  its letter, filled in while the button is held. A key that goes somewhere takes a word (Files:
   L Favourites); one that toggles shows the state it changes instead, so
   the two never read alike (Files: R as a star, outlined when R would add
   the entry, gold when it would take it away). They name buttons and take

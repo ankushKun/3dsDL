@@ -194,6 +194,12 @@ with a few hundred files.
     A opens the folder, and lands on the `.3dsx` in its folder. Stars
     survive a restart, follow a rename and a cut and paste, and go with a
     delete.
+44b. Those corners draw L and R as outlines, as HOME Menu does, legible in
+    the console's font, and a cap fills while its button is held (#26).
+44c. Install All CIAs, or Install on a selection, with a damaged CIA among
+    good ones installs the rest without stopping, then one summary names
+    each one not installed with why (#37). SELECT and a tap on an icon
+    select rows, and Options says Select, Deselect and Select All (#32).
 
 ### Software updates and Titles
 

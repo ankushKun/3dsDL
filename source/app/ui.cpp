@@ -104,6 +104,8 @@ constexpr uint64_t ScreenIn = 150;
 constexpr uint64_t FadeIn = 200;
 uint64_t touchLockStart = 0;
 bool touchLocked = false;
+// The buttons held in the last readInput, for what is drawn to follow them.
+u32 heldKeys = 0;
 uint64_t fadeStart = 0;
 bool fading = false;
 std::string lastScreen;
@@ -1081,13 +1083,15 @@ void enterScreen(const std::string &id)
 // buttons come from lines appended to sdmc:/3ds/3dsDL/input.txt, so Azahar
 // can be driven without having focus. A line is "tap X Y" in bottom screen
 // pixels or "key NAME" (A, B, X, Y, L, R, START, SELECT, UP, DOWN, LEFT,
-// RIGHT). Each is held for a few frames, then released.
+// RIGHT). Each is held for a few frames, then released; "hold NAME FRAMES"
+// holds a key that long, to see what shows while it is down.
 namespace scripted {
 
 struct Step {
     u32 key = 0; // KEY_TOUCH for a tap
     u16 x = 0;
     u16 y = 0;
+    int frames = 4; // held for
 };
 
 std::vector<Step> steps;
@@ -1135,6 +1139,10 @@ void readNew()
             step.key = KEY_TOUCH;
             step.x = static_cast<u16>(x);
             step.y = static_cast<u16>(y);
+        } else if (std::sscanf(line, "%15s %15s %u", word, name, &x) == 3 &&
+                   std::strcmp(word, "hold") == 0) {
+            step.key = keyNamed(name);
+            step.frames = static_cast<int>(std::min(x, 600u));
         } else if (std::sscanf(line, "%15s %15s", word, name) == 2 &&
                    std::strcmp(word, "key") == 0) {
             step.key = keyNamed(name);
@@ -1160,8 +1168,9 @@ void apply(Input &input, touchPosition &last)
         current = steps[next++];
         frame = 0;
     }
-    // Held for frames 0-3, released on 4, then a pause before the next.
-    if (frame < 4) {
+    // Held for its frames (0-3 for a tap or key), released on the next,
+    // then a pause before the next step.
+    if (frame < current.frames) {
         input.held |= current.key;
         if (frame == 0) {
             input.down |= current.key;
@@ -1171,10 +1180,10 @@ void apply(Input &input, touchPosition &last)
             last.px = current.x;
             last.py = current.y;
         }
-    } else if (frame == 4) {
+    } else if (frame == current.frames) {
         input.up |= current.key;
     }
-    if (++frame > 10) {
+    if (++frame > current.frames + 6) {
         frame = -1;
     }
 }
@@ -1208,6 +1217,7 @@ Input readInput()
         input.held &= ~KEY_TOUCH;
         input.up &= ~KEY_TOUCH;
     }
+    heldKeys = input.held;
     return input;
 }
 
@@ -2159,7 +2169,11 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
     const float top = TopPanel.y + TopPanel.h;
     const float height = ScreenHeight - top;
     const float radius = height / 2;
-    constexpr float Cap = 11;
+    // The key as HOME Menu shows L and R: the button's outline with its
+    // letter, filled in while the button is held.
+    constexpr float CapWidth = 13;
+    constexpr float CapHeight = 11;
+    constexpr float CapRadius = 3;
     constexpr float IconSize = 11;
     // The console's system font stands taller than Azahar's at one scale,
     // so the words and the cap's letter are sized to fit, not fixed.
@@ -2167,19 +2181,27 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
         return scale * std::min(1.0f, room / lineHeight(scale));
     };
     const float labelScale = fit(type::Tiny, height - 1);
-    const float letterScale = fit(0.3f, Cap - 1);
+    const float letterScale = fit(0.3f, CapHeight - 1);
     constexpr float Gap = 4;
     constexpr float Outer = 5; // from the screen's edge to the cap
     constexpr float Inner = 9; // clear of the rounded corner
     const float middle = top + 1 + (height - 1) / 2;
-    const auto drawCap = [&](const char *letter, float x) {
-        fillRound({x, middle - Cap / 2, Cap, Cap}, Cap / 2, color::rgb(0xFFFFFF));
+    const auto drawCap = [&](const char *letter, u32 key, float x) {
+        // Whole pixels, so the one-pixel outline stays sharp.
+        const Rect cap = {x, std::round(middle - CapHeight / 2), CapWidth,
+                          CapHeight};
+        const bool held = (heldKeys & key) != 0;
+        if (held) {
+            fillRound(cap, CapRadius, color::rgb(0xFFFFFF));
+        } else {
+            strokeRound(cap, CapRadius, 1, color::rgb(0xFFFFFF));
+        }
         drawText(letter,
-                 std::round(x + (Cap - textWidth(letter, letterScale)) / 2 +
+                 std::round(x + (CapWidth - textWidth(letter, letterScale)) / 2 +
                             inkOffset(letter, letterScale)),
-                 std::round(middle - lineHeight(letterScale) / 2 + 1),
-                 letterScale, color::rgb(0x6C6C6C));
-        return x + Cap + Gap;
+                 std::round(cap.y + (CapHeight - lineHeight(letterScale)) / 2 + 1),
+                 letterScale, held ? color::rgb(0x6C6C6C) : color::rgb(0xFFFFFF));
+        return x + CapWidth + Gap;
     };
     const auto drawIconPart = [&](const ShoulderKey &key, float x) {
         if (key.icon == Icon::None) {
@@ -2196,11 +2218,12 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
                  labelScale, color::rgb(0xFFFFFF));
         return x + textWidth(key.label, labelScale) + Gap;
     };
-    const auto draw = [&](const ShoulderKey &key, const char *letter, bool onLeft) {
+    const auto draw = [&](const ShoulderKey &key, const char *letter, u32 button,
+                          bool onLeft) {
         if (key.label.empty() && key.icon == Icon::None) {
             return;
         }
-        float content = Cap;
+        float content = CapWidth;
         if (key.icon != Icon::None) {
             content += Gap + IconSize;
         }
@@ -2220,13 +2243,13 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
         fillShape({area.x, area.y + 1, area.w, area.h - 1}, radius, corners, body, 4);
         // The cap is outermost, nearest the button.
         if (onLeft) {
-            drawLabel(key, drawIconPart(key, drawCap(letter, area.x + Outer)));
+            drawLabel(key, drawIconPart(key, drawCap(letter, button, area.x + Outer)));
         } else {
-            drawCap(letter, drawIconPart(key, drawLabel(key, area.x + Inner)));
+            drawCap(letter, button, drawIconPart(key, drawLabel(key, area.x + Inner)));
         }
     };
-    draw(left, "L", true);
-    draw(right, "R", false);
+    draw(left, "L", KEY_L, true);
+    draw(right, "R", KEY_R, false);
 }
 
 float drawTag(float x, float y, const std::string &label, u32 fill)
