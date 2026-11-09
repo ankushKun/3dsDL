@@ -141,21 +141,22 @@ private:
     // sorted, for the picture viewer's previous and next.
     void openFile(const std::string &path,
                   const std::vector<fs::Entry> *folder = nullptr);
-    // Picks how Files orders folders; changes apply as they are picked.
-    // folder is shown on the top screen when given. True when it changed.
+    // Picks how Files orders folders and whether hidden files show;
+    // changes apply as they are picked. folder is shown on the top screen
+    // when given. True when the order changed.
     bool sortScreen(const std::string &folder);
     void ciaOptions(const std::string &path);
-    // Options for the marked entries, or the highlighted one. Returns true
-    // when the folder's contents may have changed.
-    // entries is the folder as read so far, complete once all of it is;
-    // options that need every entry wait for that.
-    bool entryOptions(const std::string &folder,
-                      const std::vector<std::string> &paths,
-                      std::vector<std::string> &marked,
-                      const std::vector<fs::Entry> &entries, bool complete);
-    bool folderOptions(const std::string &folder,
-                       const std::vector<fs::Entry> &entries, bool complete,
-                       std::vector<std::string> &marked);
+    // The options sheet: a page for paths (the marked entries, or the
+    // highlighted one; none for an empty folder) and one for the folder,
+    // opening on the folder's when onFolder. Returns true when the
+    // folder's contents may have changed. entries is the folder as read so
+    // far, complete once all of it is; options that need every entry wait
+    // for that.
+    bool fileOptions(const std::string &folder,
+                     const std::vector<std::string> &paths,
+                     std::vector<std::string> &marked,
+                     const std::vector<fs::Entry> &entries, bool complete,
+                     bool onFolder);
     void textEditor(const std::string &path);
     void hexViewer(const std::string &path);
     void pictureViewer(const std::vector<std::string> &pictures,

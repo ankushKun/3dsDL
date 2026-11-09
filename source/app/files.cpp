@@ -1405,29 +1405,29 @@ void App::browseFiles(const std::string &select)
             sdChanged(folderBefore);
         };
         if (result.key == KEY_X) {
+            const bool hiddenBefore = settings_.showHiddenFiles;
             afterOptions(sortScreen(current));
+            if (settings_.showHiddenFiles != hiddenBefore) {
+                reload = true;
+            }
             continue;
         }
-        if (result.key == KEY_START || (result.key == KEY_Y && !onEntry &&
-                                         marked.empty())) {
-            const bool changed = folderOptions(current, entries, complete, marked);
-            noteChanges(changed, {});
-            afterOptions(changed);
-            continue;
-        }
-        if (result.key == KEY_Y) {
+        if (result.key == KEY_START || result.key == KEY_Y) {
             // Options are for the row the cursor is on, and for the whole
             // selection when that row is in it. Otherwise one selected entry
             // looked like the options of the row pointed at, saying
-            // Deselect for a row that was never selected.
+            // Deselect for a row that was never selected. START opens on
+            // the folder's page.
             const bool onSelected =
                 std::find(marked.begin(), marked.end(), highlighted) != marked.end();
             const std::vector<std::string> targets =
-                marked.empty() || (onEntry && !onSelected)
-                    ? std::vector<std::string>{highlighted}
-                    : marked;
+                !marked.empty() && (!onEntry || onSelected)
+                    ? marked
+                : onEntry ? std::vector<std::string>{highlighted}
+                          : std::vector<std::string>{};
             const bool changed =
-                entryOptions(current, targets, marked, entries, complete);
+                fileOptions(current, targets, marked, entries, complete,
+                            result.key == KEY_START);
             noteChanges(changed, targets);
             afterOptions(changed);
             continue;
@@ -1674,19 +1674,23 @@ void App::ciaOptions(const std::string &path)
     ui::ScreenSpec spec;
     spec.back = "Back";
     const auto add = [&](ui::Rect rect, const char *label, float scale,
-                         u32 labelColor) {
+                         u32 labelColor, ui::Icon icon, u32 iconColor) {
         ui::Control control;
         control.rect = rect;
         control.label = label;
         control.scale = scale;
         control.labelColor = labelColor;
+        control.icon = icon;
+        control.iconColor = iconColor;
         control.enabled = installer::available() || labelColor != 0;
         spec.controls.push_back(control);
     };
-    add({26, 42, 268, 38}, "Install", ui::type::Button, 0);
-    add({26, 90, 268, 38}, "Install and Delete File", ui::type::Body + 0.06f, 0);
+    add({26, 42, 268, 38}, "Install", ui::type::Button, 0, ui::Icon::Download,
+        ui::color::IconGreen);
+    add({26, 90, 268, 38}, "Install and Delete File", ui::type::Body + 0.04f, 0,
+        ui::Icon::Download, ui::color::IconGreen);
     add({26, 140, 268, 26}, "Delete File", ui::type::Small + 0.06f,
-        ui::color::Bad);
+        ui::color::Bad, ui::Icon::Trash, ui::color::IconRed);
     spec.drawTop = [&]() { screens::drawCiaTop(info, "CIA Installer"); };
     // The top screen shows whether it is installed; only say why the
     // install buttons are off.
@@ -1768,55 +1772,51 @@ void App::showChecksum(const std::string &path)
     ui::choose(dialog);
 }
 
-bool App::entryOptions(const std::string &folder,
-                       const std::vector<std::string> &paths,
-                       std::vector<std::string> &marked,
-                       const std::vector<fs::Entry> &entries, bool complete)
+bool App::fileOptions(const std::string &folder,
+                      const std::vector<std::string> &paths,
+                      std::vector<std::string> &marked,
+                      const std::vector<fs::Entry> &entries, bool complete,
+                      bool onFolder)
 {
-    if (paths.empty() || paths.front().empty()) {
-        return folderOptions(folder, entries, complete, marked);
-    }
-    enum class Action {
-        Paste,
-        Open,
+    enum Id {
         Install,
         InstallDelete,
         InstallTicket,
-        InstallAll,
-        InstallDeleteAll,
+        InstallSome,
+        Open,
         Extract,
         Edit,
-        ViewText,
-        ViewHex,
-        Rename,
-        Copy,
         Cut,
-        Delete,
-        Properties,
-        Checksum,
+        Copy,
+        Paste,
+        Rename,
         Mark,
-        ClearMarks,
-        Favorite,
-        Folder
+        Star,
+        Info,
+        Delete,
+        NewFolder,
+        NewFile,
+        MarkAll,
+        InstallHere,
+        StarFolder,
+        FolderInfo,
+        Favourites
     };
-    std::vector<ui::MenuItem> items;
-    std::vector<Action> actions;
-    const auto add = [&](const std::string &label, Action action,
-                         bool danger = false) {
-        items.push_back({label, danger, true});
-        actions.push_back(action);
-    };
+    using ui::Option;
+    namespace color = ui::color;
 
     // What the targets are, from the folder's listing: asking the card
     // about each of hundreds of marked entries took minutes.
     fileops::Lookup lookup;
-    const bool single = paths.size() == 1;
-    const std::string &path = paths.front();
+    const bool any = !paths.empty() && !paths.front().empty();
+    const bool single = any && paths.size() == 1;
+    const std::string path = any ? paths.front() : "";
     const bool isFolder = single && lookup.isFolder(path);
-    const Kind kind = isFolder ? Kind::Folder
-                             : filetype::fromName(basename(path));
+    const Kind kind = !single ? Kind::Other
+                      : isFolder ? Kind::Folder
+                                 : filetype::fromName(basename(path));
     std::vector<std::string> cias;
-    for (const std::string &entry : paths) {
+    for (const std::string &entry : any ? paths : std::vector<std::string>{}) {
         if (!lookup.isFolder(entry) &&
             filetype::fromName(basename(entry)) == Kind::Cia) {
             cias.push_back(entry);
@@ -1830,112 +1830,211 @@ bool App::entryOptions(const std::string &folder,
             }
         }
     }
+    std::vector<std::string> here; // this folder's CIAs
+    for (const fs::Entry &entry : entries) {
+        if (!entry.folder && filetype::fromName(entry.name) == Kind::Cia) {
+            here.push_back(folder + entry.name);
+        }
+    }
     const bool isMarked =
         single && std::find(marked.begin(), marked.end(), path) != marked.end();
     const std::string favorite = path + (isFolder ? "/" : "");
+    const bool starred = single && favorites::contains(settings_.favorites, favorite);
+    const bool atRoot = naming::parentFolder(folder) == folder;
+    const bool folderStarred =
+        !atRoot && favorites::contains(settings_.favorites, folder);
+    const std::string clipboardCount =
+        clipboard_.empty() ? "" : std::to_string(clipboard_.size());
 
-    // What was cut or copied goes into this folder in one step from here.
-    if (!clipboard_.empty()) {
-        add(clipboardCut_ ? "Move Here" : "Paste Here", Action::Paste);
-    }
-    if (single && kind == Kind::Cia) {
-        add("Install", Action::Install);
-        add("Install and Delete", Action::InstallDelete);
-    } else if (single && kind == Kind::Ticket) {
-        add("Install Ticket", Action::InstallTicket);
-    } else if (single && kind == Kind::Text) {
-        add("Edit", Action::Edit);
-    } else if (single) {
-        add("Open", Action::Open);
-        if (kind == Kind::Archive) {
-            add("Extract", Action::Extract);
-        }
-    }
-    if ((!single || isFolder) && !cias.empty()) {
-        add("Install " + plural(cias.size(), "CIA"), Action::InstallAll);
-        add("Install and Delete", Action::InstallDeleteAll);
-    }
-    if (single && !isFolder && kind != Kind::Text && kind != Kind::Cia) {
-        add("Open as Text", Action::ViewText);
-    }
-    if (single && !isFolder) {
-        add("Open as Hex", Action::ViewHex);
-    }
-    if (single) {
-        add("Rename", Action::Rename);
-    }
-    add("Copy", Action::Copy);
-    add("Cut", Action::Cut);
-    add("Delete", Action::Delete, true);
-    add("Properties", Action::Properties);
-    if (single && !isFolder) {
-        add("SHA-256", Action::Checksum);
-    }
-    if (single) {
-        add(isMarked ? "Deselect" : "Select", Action::Mark);
-        add(favorites::contains(settings_.favorites, favorite) ? "Unfavourite"
-                                                               : "Favourite",
-            Action::Favorite);
-    } else {
-        add("Deselect All", Action::ClearMarks);
-    }
-    add("This Folder...", Action::Folder);
+    std::vector<ui::SheetPage> pages;
 
-    // The top screen shows what the options act on: the entry as Files
-    // shows it, or what the marked items add up to without walking folders.
+    // The item, or the selection: what it is for, then the same two rows
+    // for anything, dimmed where they do not apply.
     fs::Entry entry;
     Details details;
     std::vector<ui::Fact> facts;
-    if (single) {
-        entry.name = fileops::name(path);
-        entry.folder = isFolder;
-        entry.size = lookup.size(path);
-        details = loadDetails(path, kind,
-                              kind == Kind::Audio ? findCover(folder, entries)
-                                                  : "");
-    } else {
-        size_t files = 0;
-        size_t folders = 0;
-        uint64_t bytes = 0;
-        for (const std::string &item : paths) {
-            if (lookup.isFolder(item)) {
-                ++folders;
-            } else {
-                ++files;
-                bytes += static_cast<uint64_t>(std::max<int64_t>(0, lookup.size(item)));
+    PreviewLoader preview;
+    if (any) {
+        ui::SheetPage page;
+        const screens::KindLook look = lookOf(kind);
+        page.name = single ? fileops::name(path)
+                           : std::to_string(paths.size()) + " Selected";
+        page.icon = single ? look.icon : ui::Icon::BoxCheck;
+        page.iconColor = single ? look.color : color::Tag;
+        const std::string installSome = "Install " + plural(cias.size(), "CIA");
+        if (single && kind == Kind::Cia) {
+            page.lead = {{Install, "Install", ui::Icon::Download, color::IconGreen},
+                         {InstallDelete, "Install and Delete", ui::Icon::Download,
+                          color::IconGreen}};
+        } else if (single && kind == Kind::Ticket) {
+            page.lead = {{InstallTicket, "Install Ticket", ui::Icon::Download,
+                          color::IconGreen}};
+        } else if (single && kind == Kind::Text) {
+            page.lead = {{Edit, "Edit", ui::Icon::Rename, look.color}};
+        } else if (single && kind == Kind::Archive) {
+            page.lead = {{Open, "Open", look.icon, look.color},
+                         {Extract, "Extract", ui::Icon::Download, look.color}};
+        } else if (single) {
+            page.lead = {{Open, "Open", look.icon, look.color}};
+            if (isFolder && !cias.empty()) {
+                page.lead.push_back({InstallSome, installSome, ui::Icon::Download,
+                                     color::IconGreen});
+            }
+        } else if (!cias.empty()) {
+            page.lead = {{InstallSome, installSome, ui::Icon::Download,
+                          color::IconGreen}};
+        }
+        page.rows = {
+            {{Cut, "Cut", ui::Icon::Cut, color::IconBlue},
+             {Copy, "Copy", ui::Icon::Copy, color::IconBlue},
+             {Paste, "Paste", ui::Icon::Paste, color::IconBlue, !clipboard_.empty(),
+              false, clipboardCount},
+             {Rename, "Rename", ui::Icon::Rename, color::IconBlue, single}},
+            {{Mark, isMarked || !single ? "Deselect" : "Select",
+              !single ? ui::Icon::DeselectAll
+              : isMarked ? ui::Icon::Box
+                         : ui::Icon::BoxCheck,
+              color::Tag},
+             {Star, starred ? "Unstar" : "Star",
+              starred ? ui::Icon::Star : ui::Icon::StarOutline, color::IconGold,
+              single},
+             {Info, "Info", ui::Icon::Info, color::IconGrey},
+             {Delete, "Delete", ui::Icon::Trash, color::IconRed, true, true}}};
+
+        // The top screen shows what the options act on: the entry as Files
+        // shows it, or what the marked items add up to without walking
+        // folders.
+        if (single) {
+            entry.name = fileops::name(path);
+            entry.folder = isFolder;
+            entry.size = lookup.size(path);
+            details = loadDetails(path, kind,
+                                  kind == Kind::Audio ? findCover(folder, entries)
+                                                      : "");
+        } else {
+            size_t files = 0;
+            size_t folders = 0;
+            uint64_t bytes = 0;
+            for (const std::string &item : paths) {
+                if (lookup.isFolder(item)) {
+                    ++folders;
+                } else {
+                    ++files;
+                    bytes += static_cast<uint64_t>(std::max<int64_t>(0, lookup.size(item)));
+                }
+            }
+            if (files > 0) {
+                facts.push_back({"Files", std::to_string(files) + ", " +
+                                              units::bytes(bytes)});
+            }
+            if (folders > 0) {
+                facts.push_back({"Folders", std::to_string(folders)});
+            }
+            if (!cias.empty()) {
+                facts.push_back({"CIAs", std::to_string(cias.size())});
             }
         }
-        if (files > 0) {
-            facts.push_back({"Files", std::to_string(files) + ", " +
-                                          units::bytes(bytes)});
-        }
-        if (folders > 0) {
-            facts.push_back({"Folders", std::to_string(folders)});
-        }
-    }
-    const std::string title = single ? folderTitle(folder)
-                                     : plural(paths.size(), "Selected Item");
-    PreviewLoader preview;
-    const int choice = ui::menu(items, [&](int) {
-        if (single) {
-            ui::drawTopChrome(title, ui::Icon::Folder, ui::color::IconOrange);
-            drawEntryTop(path, entry, details,
-                         preview.show(kind == Kind::Image ? path : ""));
-            return;
-        }
-        ui::drawTopChrome(title, ui::Icon::Check, ui::color::Tag);
-        ui::drawPanel();
-        ui::drawFacts(facts);
-    });
-    preview.stop();
-    if (choice < 0) {
-        return false;
+        const std::string title = single ? folderTitle(folder)
+                                         : plural(paths.size(), "Selected Item");
+        page.drawTop = [&, title]() {
+            if (single) {
+                ui::drawTopChrome(title, ui::Icon::Folder, color::IconOrange);
+                drawEntryTop(path, entry, details,
+                             preview.show(kind == Kind::Image ? path : ""));
+                return;
+            }
+            ui::drawTopChrome(title, ui::Icon::Check, color::Tag);
+            ui::drawPanel();
+            ui::drawFacts(facts);
+        };
+        pages.push_back(page);
     }
 
-    switch (actions[choice]) {
-    case Action::Paste:
-        return pasteInto(folder);
-    case Action::Open:
+    // The folder it is in.
+    std::vector<ui::Fact> folderFacts = {
+        {"Path", folder},
+        {"Sorted", sortDescription(settings_.fileSort, settings_.fileSortReverse)}};
+    folderFacts.push_back(complete ? ui::Fact {"Contains", plural(entries.size(), "item")}
+                                   : ui::Fact {"Reading", plural(entries.size(), "item") +
+                                                              " so far",
+                                               color::Badge});
+    if (!here.empty()) {
+        folderFacts.push_back({"CIAs", std::to_string(here.size())});
+    }
+    if (!marked.empty()) {
+        folderFacts.push_back({"Selected", plural(marked.size(), "item")});
+    }
+    if (!clipboard_.empty()) {
+        folderFacts.push_back(clipboardFact(clipboard_.size(), clipboardCut_));
+    }
+    {
+        ui::SheetPage page;
+        const std::string name = folderTitle(folder);
+        page.name = name;
+        page.icon = ui::Icon::Folder;
+        page.iconColor = color::IconOrange;
+        page.lead = {{NewFolder, "New Folder", ui::Icon::NewFolder, color::IconOrange},
+                     {NewFile, "New File", ui::Icon::NewFile, color::IconGrey}};
+        // Select All and Install act on every entry, so they wait until the
+        // folder is read.
+        page.rows = {
+            {{Paste, "Paste", ui::Icon::Paste, color::IconBlue, !clipboard_.empty(),
+              false, clipboardCount},
+             {MarkAll, marked.empty() ? "Select All" : "Deselect",
+              marked.empty() ? ui::Icon::SelectAll : ui::Icon::DeselectAll,
+              color::Tag, !marked.empty() || (complete && !entries.empty())},
+             {InstallHere, "Install", ui::Icon::Download, color::IconGreen,
+              complete && !here.empty(), false,
+              here.empty() ? "" : std::to_string(here.size())}},
+            {{StarFolder, folderStarred ? "Unstar" : "Star",
+              folderStarred ? ui::Icon::Star : ui::Icon::StarOutline,
+              color::IconGold, !atRoot},
+             {FolderInfo, "Info", ui::Icon::Info, color::IconGrey},
+             {Favourites, "Favourites", ui::Icon::Star, color::IconGold}}};
+        page.drawTop = [&, name]() {
+            ui::drawTopChrome(name, ui::Icon::Folder, color::IconOrange);
+            ui::drawPanel();
+            ui::drawFacts(folderFacts);
+        };
+        pages.push_back(page);
+    }
+
+    const ui::SheetResult result =
+        ui::runSheet(pages, onFolder && pages.size() > 1 ? 1 : 0);
+    preview.stop();
+
+    // Several CIAs are asked about once, with what to do with their files.
+    const auto installMany = [&](const std::vector<std::string> &list,
+                                 const std::string &from) {
+        if (list.size() == 1) {
+            installCias(list, false);
+            return true;
+        }
+        ui::Dialog dialog;
+        dialog.header = "install";
+        dialog.title = "Install " + plural(list.size(), "CIA") + "?";
+        dialog.body.push_back({"From " + from, color::Muted, 0.46f, 2});
+        dialog.buttons = {"Install", "Install and Delete", "Cancel"};
+        dialog.cancelButton = 2;
+        const int answer = ui::choose(dialog);
+        if (answer == 0 || answer == 1) {
+            installCias(list, answer == 1);
+            return true;
+        }
+        return false;
+    };
+
+    switch (result.id) {
+    case Install:
+    case InstallDelete:
+        installCias({path}, result.id == InstallDelete);
+        return true;
+    case InstallTicket:
+        installTicketFile(path);
+        return false;
+    case InstallSome:
+        return installMany(cias, isFolder ? path + "/" : folder);
+    case Open:
         if (isFolder) {
             filesFolder_ = path + "/";
             marked.clear();
@@ -1943,216 +2042,80 @@ bool App::entryOptions(const std::string &folder,
             openFile(path);
         }
         return true;
-    case Action::Install:
-    case Action::InstallDelete:
-        installCias({path}, actions[choice] == Action::InstallDelete);
-        return true;
-    case Action::InstallTicket:
-        installTicketFile(path);
-        return false;
-    case Action::InstallAll:
-    case Action::InstallDeleteAll:
-        installCias(cias, actions[choice] == Action::InstallDeleteAll);
-        return true;
-    case Action::Extract:
+    case Extract:
         offerExtraction(path, folderOf(path), "",
                         "Extract " + basename(path) + "?");
         return true;
-    case Action::Edit:
-    case Action::ViewText:
+    case Edit:
         textEditor(path);
         return true;
-    case Action::ViewHex:
-        hexViewer(path);
-        return false;
-    case Action::Rename:
-        return renameEntry(path);
-    case Action::Copy:
-    case Action::Cut:
+    case Cut:
+    case Copy: {
         clipboard_ = paths;
-        clipboardCut_ = actions[choice] == Action::Cut;
-        ui::message(clipboardCut_ ? "Ready to Move" : "Ready to Copy",
-                    std::string("Open a folder and choose ") +
-                        (clipboardCut_ ? "Move Here" : "Paste Here") +
-                        " in Options.");
-        return true;
-    case Action::Delete:
-        return deleteEntries(paths);
-    case Action::Properties:
-        showProperties(paths);
+        clipboardCut_ = result.id == Cut;
+        ui::Notice notice;
+        notice.title = clipboardCut_ ? "Cut" : "Copied";
+        notice.text = single ? fileops::name(path) : plural(paths.size(), "item");
+        notice.icon = clipboardCut_ ? ui::Icon::Cut : ui::Icon::Copy;
+        ui::notify(notice);
         return false;
-    case Action::Checksum:
-        showChecksum(path);
-        return false;
-    case Action::Mark:
-        if (isMarked) {
+    }
+    case Paste:
+        return pasteInto(folder);
+    case Rename:
+        return renameEntry(path);
+    case Mark:
+        if (!single) {
+            marked.clear();
+        } else if (isMarked) {
             marked.erase(std::find(marked.begin(), marked.end(), path));
         } else {
             marked.push_back(path);
         }
         return false;
-    case Action::ClearMarks:
-        marked.clear();
-        return false;
-    case Action::Favorite:
+    case Star:
         toggleFavorite(favorite);
         return false;
-    case Action::Folder:
-        return folderOptions(folder, entries, complete, marked);
-    }
-    return false;
-}
-
-bool App::folderOptions(const std::string &folder,
-                        const std::vector<fs::Entry> &entries, bool complete,
-                        std::vector<std::string> &marked)
-{
-    enum class Action {
-        Paste,
-        ClearClipboard,
-        NewFolder,
-        NewFile,
-        Sort,
-        Hidden,
-        MarkAll,
-        ClearMarks,
-        InstallAll,
-        Favorite,
-        Favorites,
-        Properties
-    };
-    std::vector<ui::MenuItem> items;
-    std::vector<Action> actions;
-    const auto add = [&](const std::string &label, Action action,
-                         bool enabled = true) {
-        items.push_back({label, false, enabled});
-        actions.push_back(action);
-    };
-
-    // Sort first, so SELECT and A reach it from any folder.
-    add("Sort...", Action::Sort);
-    if (!clipboard_.empty()) {
-        add(clipboardCut_ ? "Move Here" : "Paste Here", Action::Paste);
-        add("Forget Clipboard", Action::ClearClipboard);
-    }
-    add("New Folder", Action::NewFolder);
-    add("New File", Action::NewFile);
-    add(std::string("Hidden: ") + (settings_.showHiddenFiles ? "On" : "Off"),
-        Action::Hidden);
-    // These act on every entry, so they wait until the folder is read.
-    if (!entries.empty()) {
-        add("Select All", Action::MarkAll, complete);
-    }
-    if (!marked.empty()) {
-        add("Deselect All", Action::ClearMarks);
-    }
-    size_t cias = 0;
-    for (const fs::Entry &entry : entries) {
-        if (!entry.folder && filetype::fromName(entry.name) == Kind::Cia) {
-            ++cias;
-        }
-    }
-    if (cias > 0) {
-        add("Install All CIAs", Action::InstallAll, complete);
-    }
-    const bool atRoot = naming::parentFolder(folder) == folder;
-    if (!atRoot) {
-        add(favorites::contains(settings_.favorites, folder) ? "Unfavourite"
-                                                             : "Favourite",
-            Action::Favorite);
-    }
-    add("Favourites...", Action::Favorites);
-    add("Properties", Action::Properties);
-
-    const std::string name = folderTitle(folder);
-    std::vector<ui::Fact> facts = {
-        {"Path", folder},
-        {"Sorted", sortDescription(settings_.fileSort, settings_.fileSortReverse)}};
-    facts.push_back(complete ? ui::Fact {"Contains", plural(entries.size(), "item")}
-                             : ui::Fact {"Reading", plural(entries.size(), "item") +
-                                                        " so far",
-                                         ui::color::Badge});
-    if (cias > 0) {
-        facts.push_back({"CIAs", std::to_string(cias)});
-    }
-    if (!marked.empty()) {
-        facts.push_back({"Selected", plural(marked.size(), "item")});
-    }
-    if (!clipboard_.empty()) {
-        facts.push_back(clipboardFact(clipboard_.size(), clipboardCut_));
-    }
-    const int choice = ui::menu(items, [&](int) {
-        ui::drawTopChrome(name, ui::Icon::Folder, ui::color::IconOrange);
-        ui::drawPanel();
-        ui::drawFacts(facts);
-    });
-    if (choice < 0) {
+    case Info:
+        showProperties(paths);
         return false;
-    }
-    switch (actions[choice]) {
-    case Action::Paste:
-        return pasteInto(folder);
-    case Action::ClearClipboard:
-        clipboard_.clear();
-        return false;
-    case Action::NewFolder:
+    case Delete:
+        return deleteEntries(paths);
+    case NewFolder:
         return createFolder(folder);
-    case Action::NewFile:
+    case NewFile:
         return createFile(folder);
-    case Action::Sort:
-        return sortScreen(folder);
-    case Action::Hidden:
-        settings_.showHiddenFiles = !settings_.showHiddenFiles;
-        persistSettings();
-        return true;
-    case Action::MarkAll:
-        marked.clear();
-        for (const fs::Entry &entry : entries) {
-            marked.push_back(folder + entry.name);
+    case MarkAll:
+        if (!marked.empty()) {
+            marked.clear();
+            return false;
+        }
+        for (const fs::Entry &each : entries) {
+            marked.push_back(folder + each.name);
         }
         return false;
-    case Action::ClearMarks:
-        marked.clear();
-        return false;
-    case Action::InstallAll: {
-        std::vector<std::string> paths;
-        for (const fs::Entry &entry : entries) {
-            if (!entry.folder && filetype::fromName(entry.name) == Kind::Cia) {
-                paths.push_back(folder + entry.name);
-            }
-        }
-        ui::Dialog dialog;
-        dialog.header = "install";
-        dialog.title = "Install " + plural(paths.size(), "CIA") + "?";
-        dialog.body.push_back({"From " + folder, ui::color::Muted, 0.46f, 2});
-        dialog.buttons = {"Install", "Install and Delete", "Cancel"};
-        dialog.cancelButton = 2;
-        const int answer = ui::choose(dialog);
-        if (answer == 0 || answer == 1) {
-            installCias(paths, answer == 1);
-            return true;
-        }
-        return false;
-    }
-    case Action::Favorite:
+    case InstallHere:
+        return installMany(here, folder);
+    case StarFolder:
         toggleFavorite(folder);
         return false;
-    case Action::Favorites:
+    case FolderInfo: {
+        std::string self = folder;
+        if (self.size() > 6 && self.back() == '/') {
+            self.pop_back();
+        }
+        showProperties({self});
+        return false;
+    }
+    case Favourites:
         if (favoritesScreen()) {
             marked.clear();
             return true;
         }
         return false;
-    case Action::Properties: {
-        std::string path = folder;
-        if (path.size() > 6 && path.back() == '/') {
-            path.pop_back();
-        }
-        showProperties({path});
+    default:
         return false;
     }
-    }
-    return false;
 }
 
 bool App::sortScreen(const std::string &folder)
@@ -2181,7 +2144,7 @@ bool App::sortScreen(const std::string &folder)
         for (int index = 0; index < 4; ++index) {
             ui::Control control;
             control.rect = {index % 2 == 0 ? 26.0f : 164.0f,
-                            index < 2 ? 29.0f : 81.0f, 130, 40};
+                            index < 2 ? 16.0f : 62.0f, 130, 38};
             control.label = Orders[index].label;
             control.style = Orders[index].order == settings_.fileSort
                                 ? ui::Style::Chosen
@@ -2189,11 +2152,17 @@ bool App::sortScreen(const std::string &folder)
             spec.controls.push_back(control);
         }
         ui::Control reverse;
-        reverse.rect = {26, 139, 268, 40};
+        reverse.rect = {26, 116, 268, 38};
         reverse.label = "Reverse Order";
         reverse.style = settings_.fileSortReverse ? ui::Style::Chosen
                                                   : ui::Style::Normal;
         spec.controls.push_back(reverse);
+        ui::Control hidden = reverse;
+        hidden.rect.y = 162;
+        hidden.label = "Show Hidden Files";
+        hidden.style = settings_.showHiddenFiles ? ui::Style::Chosen
+                                                 : ui::Style::Normal;
+        spec.controls.push_back(hidden);
         spec.drawTop = [&]() {
             ui::drawTopChrome("Sort", ui::Icon::Folder, ui::color::IconOrange);
             ui::drawPanel();
@@ -2210,6 +2179,8 @@ bool App::sortScreen(const std::string &folder)
             settings_.fileSort = Orders[result.choice].order;
         } else if (result.choice == 4) {
             settings_.fileSortReverse = !settings_.fileSortReverse;
+        } else if (result.choice == 5) {
+            settings_.showHiddenFiles = !settings_.showHiddenFiles;
         } else {
             break;
         }
@@ -2649,6 +2620,10 @@ bool App::pasteInto(const std::string &folder)
             persistSettings();
         }
     }
+    // A copy is pasted once, so the clipboard never lingers.
+    if (!clipboardCut_ && !steps.empty() && result.status == fileops::Status::Ok) {
+        clipboard_.clear();
+    }
     if (result.status == fileops::Status::Failed) {
         problems.insert(problems.begin(), result.message);
     } else if (result.status == fileops::Status::Cancelled) {
@@ -2775,6 +2750,10 @@ void App::showProperties(const std::vector<std::string> &paths)
     ui::Dialog dialog;
     dialog.title = units::bytes(totals.bytes);
     dialog.buttons = {"OK"};
+    if (single && !folder) {
+        dialog.buttons = {"OK", "SHA-256", "Hex View"};
+        dialog.cancelButton = 0;
+    }
     dialog.drawTop = [&]() {
         if (single) {
             ui::drawTopChrome(folderTitle(parent), ui::Icon::Folder,
@@ -2795,7 +2774,12 @@ void App::showProperties(const std::vector<std::string> &paths)
         ui::drawPanel();
         ui::drawFacts(facts);
     };
-    ui::choose(dialog);
+    const int choice = ui::choose(dialog);
+    if (choice == 1) {
+        showChecksum(path);
+    } else if (choice == 2) {
+        hexViewer(path);
+    }
 }
 
 // --- Viewers ----------------------------------------------------------------------
