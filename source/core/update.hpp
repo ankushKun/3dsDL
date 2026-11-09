@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Finding out whether a newer 3dsDL has been released, from GitHub's
@@ -53,10 +54,22 @@ const Asset *findAsset(const Release &release, const std::string &name);
 // listing does not mention it.
 std::string checksumFor(const std::string &listing, const std::string &name);
 
+// [start, end) byte offsets into a line.
+using Spans = std::vector<std::pair<size_t, size_t>>;
+
+// A line of release notes for the small screen, with what the Markdown
+// marked in it.
+struct NoteLine {
+    std::string text;     // "" between paragraphs
+    bool heading = false; // a # heading, or a line bold all through
+    Spans bold;           // where **bold** ran in text, outside headings
+};
 // The release text as plain lines for the small screen: Markdown marks,
 // links, images and HTML are removed, list items start with "- " and keep
 // their nesting as indentation, and runs of blank lines become one. Starts
 // at the "What's new" heading when there is one.
+std::vector<NoteLine> noteText(const std::string &markdown);
+// The same lines' text alone.
 std::vector<std::string> noteLines(const std::string &markdown);
 
 } // namespace update

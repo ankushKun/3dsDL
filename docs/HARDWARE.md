@@ -207,6 +207,8 @@ with a few hundred files.
     notification on Home and the New badges. Settings, Updates installs the
     new CIA over itself and restarts into it; with the .3dsx it replaces the
     file and closes, and the Homebrew Launcher starts the new version.
+45a. What's New draws bold words and headings in bold with list items apart,
+    and the D-pad eases three lines a press and glides while held (#25).
 46. Titles lists every installed game, update and DLC with the right icon,
     name, version and size, including DSiWare in the system memory, and no
     system titles. The CIA build can read every icon (FS access rights).

@@ -156,6 +156,53 @@ TEST("update: turns release notes into plain lines")
     CHECK_EQ(plain.size(), static_cast<size_t>(3));
 }
 
+TEST("update: release notes keep their headings and where bold ran")
+{
+    const std::vector<update::NoteLine> notes = update::noteText(
+        "## What's new\n"
+        "### Files\n"
+        "- **Favourites:** R stars a folder, and **L** opens them.\n"
+        "  - A [**linked**](https://example.com) word and __this__.\n"
+        "A paragraph, then a list:\n"
+        "**Bold all through**\n"
+        "- Unclosed **bold\n"
+        "- snake_case and *italic* stay plain\n");
+    CHECK_EQ(notes.size(), static_cast<size_t>(7));
+    CHECK_EQ(notes[0].text, std::string("Files"));
+    CHECK(notes[0].heading);
+    CHECK(notes[0].bold.empty());
+
+    CHECK_EQ(notes[1].text,
+             std::string("- Favourites: R stars a folder, and L opens them."));
+    CHECK(!notes[1].heading);
+    CHECK_EQ(notes[1].bold.size(), static_cast<size_t>(2));
+    CHECK_EQ(notes[1].text.substr(notes[1].bold[0].first,
+                                  notes[1].bold[0].second - notes[1].bold[0].first),
+             std::string("Favourites:"));
+    CHECK_EQ(notes[1].text.substr(notes[1].bold[1].first,
+                                  notes[1].bold[1].second - notes[1].bold[1].first),
+             std::string("L"));
+
+    // Nested items keep their indent, and bold inside a link counts.
+    CHECK_EQ(notes[2].text, std::string("  - A linked word and this."));
+    CHECK_EQ(notes[2].bold.size(), static_cast<size_t>(2));
+    CHECK_EQ(notes[2].text.substr(notes[2].bold[0].first, 6), std::string("linked"));
+    CHECK_EQ(notes[2].text.substr(notes[2].bold[1].first, 4), std::string("this"));
+
+    // Only a # heading or a line bold all through is a heading, not a
+    // paragraph that comes before a list.
+    CHECK(!notes[3].heading);
+    CHECK_EQ(notes[4].text, std::string("Bold all through"));
+    CHECK(notes[4].heading);
+    CHECK(notes[4].bold.empty());
+
+    // An unclosed run marks nothing.
+    CHECK_EQ(notes[5].text, std::string("- Unclosed bold"));
+    CHECK(notes[5].bold.empty());
+    CHECK_EQ(notes[6].text, std::string("- snake_case and italic stay plain"));
+    CHECK(notes[6].bold.empty());
+}
+
 TEST("update: pre-releases come before their release, in SemVer order")
 {
     // A tester on a beta is offered the release, and nothing older.

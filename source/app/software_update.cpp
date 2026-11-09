@@ -213,27 +213,97 @@ void App::showReleaseNotes(const update::Release &release)
     constexpr float Width = 356;
     const float pitch = ui::lineHeight(Scale) * 0.92f;
 
-    // Wrapped once; list items keep their indent on following lines.
-    std::vector<std::string> lines;
-    for (const std::string &note : update::noteLines(release.notes)) {
-        const size_t indent = note.find_first_not_of(' ');
-        const bool item = indent != std::string::npos &&
-                          note.compare(indent, 2, "- ") == 0;
-        const std::string hang(item ? indent + 2 : 0, ' ');
-        const std::vector<std::string> wrapped =
-            ui::wrap(note, Scale, Width, 40);
-        for (size_t index = 0; index < wrapped.size(); ++index) {
-            lines.push_back(index == 0 ? wrapped[index] : hang + wrapped[index]);
+    // Laid out once: list items keep their indent on following lines, sit
+    // a little apart from each other, and bold words stay bold.
+    struct Line {
+        std::string text;
+        update::Spans bold;
+        bool heading = false;
+        float y = 0; // from the top of the notes
+    };
+    std::vector<Line> lines;
+    float y = 0;
+    bool afterItem = false;
+    for (const update::NoteLine &note : update::noteText(release.notes)) {
+        if (note.text.empty()) {
+            y += pitch * 0.7f;
+            afterItem = false;
+            continue;
         }
-        if (wrapped.empty()) {
-            lines.push_back("");
+        const size_t indent = note.text.find_first_not_of(' ');
+        const bool item = indent != std::string::npos &&
+                          note.text.compare(indent, 2, "- ") == 0;
+        if (item && afterItem) {
+            y += pitch * 0.4f;
+        }
+        afterItem = item;
+        const std::string hang(item ? indent + 2 : 0, ' ');
+        // Each wrapped piece is part of the note, found in order, so the
+        // bold runs can be cut to fit it.
+        size_t from = 0;
+        bool first = true;
+        for (const std::string &piece : ui::wrap(note.text, Scale, Width, 40)) {
+            Line line;
+            line.heading = note.heading;
+            const size_t at = note.text.find(piece, from);
+            const std::string lead = first ? "" : hang;
+            line.text = lead + piece;
+            if (at != std::string::npos) {
+                from = at + piece.size();
+                for (const auto &span : note.bold) {
+                    const size_t start = std::max(span.first, at);
+                    const size_t end = std::min(span.second, from);
+                    if (start < end) {
+                        line.bold.push_back({lead.size() + start - at,
+                                             lead.size() + end - at});
+                    }
+                }
+            }
+            line.y = y;
+            y += pitch;
+            first = false;
+            lines.push_back(line);
         }
     }
     const float viewport = ui::ScreenHeight - Top - 4;
-    const float content = lines.size() * pitch;
+    const float content = y;
     const std::string title = "What's New in " + release.version;
 
+    // Bold as the console's one-weight font can: drawn twice, a pixel apart.
+    const auto drawLine = [&](const Line &line, float top) {
+        const u32 color = line.heading ? ui::color::Accent : ui::color::Ink;
+        if (line.heading) {
+            ui::drawText(line.text, 22, top, Scale, color);
+            ui::drawText(line.text, 23, top, Scale, color);
+            return;
+        }
+        float x = 22;
+        size_t at = 0;
+        const auto part = [&](size_t end, bool bold) {
+            if (end <= at) {
+                return;
+            }
+            const std::string text = line.text.substr(at, end - at);
+            ui::drawText(text, x, top, Scale, bold ? ui::color::InkStrong : color);
+            if (bold) {
+                ui::drawText(text, x + 1, top, Scale, ui::color::InkStrong);
+            }
+            x += ui::textWidth(text, Scale) + (bold ? 1 : 0);
+            at = end;
+        };
+        for (const auto &span : line.bold) {
+            part(span.first, false);
+            part(span.second, true);
+        }
+        part(line.text.size(), false);
+    };
+
     ui::Scroller scroller;
+    // Where the D-pad is taking the view: a press moves three lines, and
+    // holding it glides on; both ease there rather than jump.
+    float target = 0;
+    bool gliding = false;
+    uint64_t heldSince = 0;
     bool backPressed = false;
     const ui::Rect back = ui::tabRect(ui::Tab::Left);
     ui::enterScreen("whats-new");
@@ -252,10 +322,29 @@ void App::showReleaseNotes(const update::Release &release)
             backPressed = false;
         }
         const float maxOffset = std::max(0.0f, content - viewport);
-        if (input.repeat & (KEY_DOWN | KEY_UP)) {
-            const float step = (input.repeat & KEY_DOWN) ? pitch * 3 : -pitch * 3;
-            scroller.setOffset(std::max(0.0f, std::min(maxOffset,
-                                                       scroller.offset() + step)));
+        const auto clamp = [&](float value) {
+            return std::max(0.0f, std::min(maxOffset, value));
+        };
+        const u32 dpad = KEY_DOWN | KEY_UP;
+        if (input.down & dpad) {
+            target = clamp((gliding ? target : scroller.offset()) +
+                           ((input.down & KEY_DOWN) ? pitch * 3 : -pitch * 3));
+            heldSince = ui::now();
+            gliding = true;
+        } else if ((input.held & dpad) && ui::now() - heldSince > 300) {
+            target = clamp(target + ((input.held & KEY_DOWN) ? 6.0f : -6.0f));
+            gliding = true;
+        }
+        if (input.held & KEY_TOUCH) {
+            gliding = false; // the stylus has the list now
+        }
+        if (gliding) {
+            const float now = scroller.offset();
+            const float next = std::fabs(target - now) < 0.5f
+                                   ? target
+                                   : now + (target - now) * 0.3f;
+            scroller.setOffset(next);
+            gliding = next != target;
         }
         if (!backPressed) {
             scroller.update(input, {0, 0, 320, 205}, content, viewport);
@@ -263,22 +352,15 @@ void App::showReleaseNotes(const update::Release &release)
 
         ui::beginFrame();
         const float offset = scroller.offset();
-        for (size_t index = 0; index < lines.size(); ++index) {
-            const float y = Top + index * pitch - offset;
-            if (y > ui::ScreenHeight) {
+        for (const Line &line : lines) {
+            const float top = Top + line.y - offset;
+            if (top > ui::ScreenHeight) {
                 break;
             }
-            if (y + pitch < Top - pitch) {
+            if (top + pitch < Top - pitch) {
                 continue;
             }
-            const std::string &line = lines[index];
-            const bool heading = !line.empty() && line[0] != ' ' &&
-                                 line.compare(0, 2, "- ") != 0 &&
-                                 index + 1 < lines.size() &&
-                                 (lines[index + 1].empty() ||
-                                  lines[index + 1].compare(0, 2, "- ") == 0);
-            ui::drawText(line, 22, y, Scale,
-                         heading ? ui::color::Accent : ui::color::Ink);
+            drawLine(line, top);
         }
         // Lines scrolled past the top are covered again by the chrome.
         ui::fillRound({0, 0, ui::TopWidth, Top - 4}, 0, ui::color::TopA);

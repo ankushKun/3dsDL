@@ -132,10 +132,13 @@ std::string lower(std::string text)
 
 // Inline Markdown to plain text: images go, links keep their words, and
 // emphasis and code marks are dropped.
-std::string plainInline(const std::string &text)
+// bold, when given, gets where **bold** and __bold__ ran in what is
+// returned, as [start, end) offsets.
+std::string plainInline(const std::string &text, Spans *bold = nullptr)
 {
     std::string out;
     size_t index = 0;
+    size_t boldFrom = std::string::npos; // where an open bold run started
     while (index < text.size()) {
         const char c = text[index];
         if (c == '<') {
@@ -155,19 +158,34 @@ std::string plainInline(const std::string &text)
                 const size_t end = text.find(')', close);
                 if (end != std::string::npos) {
                     if (!image) {
-                        out += plainInline(text.substr(open + 1, close - open - 1));
+                        Spans inner;
+                        const size_t at = out.size();
+                        out += plainInline(text.substr(open + 1, close - open - 1),
+                                           bold != nullptr ? &inner : nullptr);
+                        for (const auto &span : inner) {
+                            bold->push_back({at + span.first, at + span.second});
+                        }
                     }
                     index = end + 1;
                     continue;
                 }
             }
         }
-        if (c == '*' || c == '`' ||
-            (c == '_' && (index + 1 < text.size() && text[index + 1] == '_'))) {
-            ++index;
-            if (c == '_') {
-                ++index;
+        const bool doubled = index + 1 < text.size() && text[index + 1] == c;
+        if ((c == '*' || c == '_') && doubled) {
+            if (boldFrom == std::string::npos) {
+                boldFrom = out.size();
+            } else {
+                if (bold != nullptr && out.size() > boldFrom) {
+                    bold->push_back({boldFrom, out.size()});
+                }
+                boldFrom = std::string::npos;
             }
+            index += 2;
+            continue;
+        }
+        if (c == '*' || c == '`') {
+            ++index;
             continue;
         }
         out += c;
@@ -288,7 +306,7 @@ std::string checksumFor(const std::string &listing, const std::string &name)
     return "";
 }
 
-std::vector<std::string> noteLines(const std::string &markdown)
+std::vector<NoteLine> noteText(const std::string &markdown)
 {
     std::vector<std::string> raw;
     size_t start = 0;
@@ -316,7 +334,7 @@ std::vector<std::string> noteLines(const std::string &markdown)
         }
     }
 
-    std::vector<std::string> lines;
+    std::vector<NoteLine> lines;
     bool inComment = false;
     for (size_t index = first; index < raw.size(); ++index) {
         std::string line = raw[index];
@@ -336,7 +354,8 @@ std::vector<std::string> noteLines(const std::string &markdown)
         }
         std::string body = trim(line);
         std::string prefix;
-        if (body.rfind("#", 0) == 0) {
+        const bool heading = body.rfind("#", 0) == 0;
+        if (heading) {
             body = trim(body.substr(body.find_first_not_of('#')));
         } else if (body.rfind("- ", 0) == 0 || body.rfind("* ", 0) == 0 ||
                    body.rfind("+ ", 0) == 0) {
@@ -345,21 +364,49 @@ std::vector<std::string> noteLines(const std::string &markdown)
         } else if (body == "---" || body == "***") {
             body.clear();
         }
-        body = trim(plainInline(body));
+        Spans bold;
+        const std::string plain = plainInline(body, &bold);
+        const size_t lead = std::min(plain.size(), plain.find_first_not_of(" \t"));
+        body = trim(plain);
         // GitHub's generated link to the full comparison means nothing here.
         if (lower(body).rfind("full changelog", 0) == 0) {
             continue;
         }
         if (body.empty()) {
-            if (!lines.empty() && !lines.back().empty()) {
-                lines.push_back("");
+            if (!lines.empty() && !lines.back().text.empty()) {
+                lines.push_back({});
             }
             continue;
         }
-        lines.push_back(prefix + body);
+        NoteLine note;
+        note.text = prefix + body;
+        for (const auto &span : bold) {
+            const size_t start = std::max(span.first, lead) - lead;
+            const size_t end = std::min(span.second - lead, body.size());
+            if (span.second > lead && start < end) {
+                note.bold.push_back({prefix.size() + start, prefix.size() + end});
+            }
+        }
+        // A line that is bold all through stands for a heading too.
+        note.heading = heading ||
+                       (prefix.empty() && note.bold.size() == 1 &&
+                        note.bold[0].first == 0 && note.bold[0].second == body.size());
+        if (note.heading) {
+            note.bold.clear();
+        }
+        lines.push_back(note);
     }
-    while (!lines.empty() && lines.back().empty()) {
+    while (!lines.empty() && lines.back().text.empty()) {
         lines.pop_back();
+    }
+    return lines;
+}
+
+std::vector<std::string> noteLines(const std::string &markdown)
+{
+    std::vector<std::string> lines;
+    for (const NoteLine &note : noteText(markdown)) {
+        lines.push_back(note.text);
     }
     return lines;
 }
