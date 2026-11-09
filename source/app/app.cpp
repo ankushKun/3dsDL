@@ -1882,12 +1882,15 @@ void App::historyScreen()
         std::vector<ui::MenuItem> items;
         std::vector<Action> actions;
         if (installable) {
-            items.push_back({"Install"});
+            items.push_back({"Install", false, true, ui::Icon::Download,
+                             ui::color::IconGreen});
             actions.push_back(Action::Install);
         }
-        items.push_back({canResume ? "Resume Download" : "Download Again"});
+        items.push_back({canResume ? "Resume Download" : "Download Again", false,
+                         true, ui::Icon::History, ui::color::IconBlue});
         actions.push_back(Action::Download);
-        items.push_back({"Remove from History", true});
+        items.push_back({"Remove from History", true, true, ui::Icon::Trash,
+                         ui::color::IconRed});
         actions.push_back(Action::Remove);
         const int choice = ui::menu(items, [&](int) {
             ui::drawTopChrome("History", ui::Icon::History, ui::color::IconRed);

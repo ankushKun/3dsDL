@@ -349,6 +349,11 @@ struct Control {
     // A small badge such as "New" on the top right corner.
     std::string badge;
     u32 badgeColor = color::Badge;
+    // An icon over a short label, as in an option sheet's rows.
+    bool tool = false;
+    // Drawn by drawBottom: it takes a touch but never the D-pad ring, as
+    // the segments that switch an option sheet's pages do.
+    bool touchOnly = false;
 };
 
 struct ScreenSpec {
@@ -391,10 +396,48 @@ struct MenuItem {
     std::string label;
     bool danger = false;
     bool enabled = true;
+    Icon icon = Icon::None;
+    u32 iconColor = color::IconGrey;
 };
 int menu(const std::vector<MenuItem> &items,
          const std::function<void(int)> &drawTop,
          const std::string &back = "Back");
+
+// --- Option sheets ----------------------------------------------------------------
+
+// One thing an option sheet does.
+struct Option {
+    int id = 0; // what runSheet reports
+    std::string label;
+    Icon icon = Icon::None;
+    u32 iconColor = color::IconGrey;
+    bool enabled = true; // dimmed in its place when false
+    bool danger = false;  // a red label, for what deletes
+    std::string badge {}; // a count on its corner
+};
+
+// What a sheet offers for one target, such as a file or the folder it is in.
+struct SheetPage {
+    std::string name; // on its segment, when the sheet has two pages
+    Icon icon = Icon::None;
+    u32 iconColor = color::IconGrey;
+    // Up to two wide buttons for what the target is for (Install, Open).
+    std::vector<Option> lead;
+    // Up to two rows of three or four icon buttons over their labels. A row
+    // keeps its options in their places: what does not apply is dimmed, so
+    // every option is always where it was, and Delete goes last.
+    std::vector<std::vector<Option>> rows;
+    std::function<void()> drawTop;
+};
+
+struct SheetResult {
+    int page = 0;
+    int id = -1; // the chosen option's, or -1 for Back
+};
+
+// Shows a page, or two as segments that L, R and a tap switch between, until
+// an option is chosen or B goes back. page is the one shown first.
+SheetResult runSheet(const std::vector<SheetPage> &pages, int page = 0);
 
 // One choice out of several, the current one drawn as chosen. Picking one
 // returns its index at once; Back returns -1.

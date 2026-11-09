@@ -342,10 +342,11 @@ void atlasQuad(float x, float y, float w, float h, float u0, float v0,
                           bottomRight);
         return;
     }
-    const float size = static_cast<float>(IconAtlasSize);
+    const float wide = static_cast<float>(IconAtlasWidth);
+    const float high = static_cast<float>(IconAtlasHeight);
     Tex3DS_SubTexture sub = {static_cast<u16>(std::max(1.0f, w)),
-                             static_cast<u16>(std::max(1.0f, h)), u0 / size,
-                             1.0f - v0 / size, u1 / size, 1.0f - v1 / size};
+                             static_cast<u16>(std::max(1.0f, h)), u0 / wide,
+                             1.0f - v0 / high, u1 / wide, 1.0f - v1 / high};
     const C2D_Image image = {&atlasTexture, &sub};
     C2D_DrawParams params = {{x, y, w, h}, {0, 0}, Depth, 0};
     C2D_ImageTint tint;
@@ -672,14 +673,14 @@ void loadAtlas()
         return;
     }
     // White with the icon's coverage as alpha, so a tint colours it.
-    if (width == IconAtlasSize && height == IconAtlasSize &&
-        makeTexture(atlasTexture, IconAtlasSize, IconAtlasSize, GPU_LA8)) {
+    if (width == IconAtlasWidth && height == IconAtlasHeight &&
+        makeTexture(atlasTexture, IconAtlasWidth, IconAtlasHeight, GPU_LA8)) {
         uint16_t *texels = static_cast<uint16_t *>(atlasTexture.data);
-        for (uint32_t y = 0; y < IconAtlasSize; ++y) {
-            for (uint32_t x = 0; x < IconAtlasSize; ++x) {
-                texels[image::tiledIndex(x, y, IconAtlasSize)] =
+        for (uint32_t y = 0; y < IconAtlasHeight; ++y) {
+            for (uint32_t x = 0; x < IconAtlasWidth; ++x) {
+                texels[image::tiledIndex(x, y, IconAtlasWidth)] =
                     static_cast<uint16_t>(
-                        0xff00 | pixels[(y * IconAtlasSize + x) * 4 + 3]);
+                        0xff00 | pixels[(y * IconAtlasWidth + x) * 4 + 3]);
             }
         }
         C3D_TexFlush(&atlasTexture);
@@ -1708,10 +1709,10 @@ void drawIcon(Icon icon, float x, float y, float size, u32 tint)
     const float cellSize = static_cast<float>(IconSizes[pick]);
     Tex3DS_SubTexture &sub = atlasSub[atlasSubNext++ % 64];
     sub = {static_cast<u16>(cellSize), static_cast<u16>(cellSize),
-           cell.x / static_cast<float>(IconAtlasSize),
-           1.0f - cell.y / static_cast<float>(IconAtlasSize),
-           (cell.x + cellSize) / IconAtlasSize,
-           1.0f - (cell.y + cellSize) / IconAtlasSize};
+           cell.x / static_cast<float>(IconAtlasWidth),
+           1.0f - cell.y / static_cast<float>(IconAtlasHeight),
+           (cell.x + cellSize) / IconAtlasWidth,
+           1.0f - (cell.y + cellSize) / IconAtlasHeight};
     const C2D_Image image = {&atlasTexture, &sub};
     C2D_ImageTint shade;
     C2D_PlainImageTint(&shade, tint, 1.0f);
@@ -2778,6 +2779,24 @@ void message(const std::string &title, const std::string &text, Tone tone,
 
 namespace {
 
+// An option sheet's button: its icon over a short label, which gets a little
+// narrower before it scrolls. A dimmed one keeps its place, drawn faded.
+void drawToolButton(const Rect &area, const std::string &label, Icon icon,
+                    u32 iconColor, bool enabled, u32 labelColor, bool pressed)
+{
+    drawButtonBody(area, 8, enabled ? Style::Normal : Style::Disabled, pressed);
+    const u32 faded = color::rgb(0xCFC48A);
+    constexpr float IconSize = 22;
+    constexpr float Scale = 0.44f;
+    const float block = IconSize + 1 + lineHeight(Scale);
+    const float top = area.y + (area.h - block) / 2 + (pressed ? 1 : 0);
+    drawIcon(icon, area.x + (area.w - IconSize) / 2, top, IconSize,
+             enabled ? iconColor : faded);
+    drawMarquee(label, area.x + area.w / 2, top + IconSize + 1, Scale,
+                !enabled ? faded : labelColor != 0 ? labelColor : color::InkButton,
+                area.w - 8, C2D_AlignCenter);
+}
+
 // The focusable things on a screen: controls, then the left and right tab.
 struct Target {
     Rect rect;
@@ -2867,7 +2886,17 @@ ScreenResult runScreen(const ScreenSpec &spec, int &focus)
     const auto build = [&](int keep) {
         targets.clear();
         for (size_t index = 0; index < spec.controls.size(); ++index) {
-            if (spec.controls[index].enabled) {
+            if (spec.controls[index].enabled && !spec.controls[index].touchOnly) {
+                targets.push_back({spec.controls[index].rect,
+                                   static_cast<int>(index), false});
+            }
+        }
+        // The ring's controls come first, at the same index in targets as
+        // in controls; touch-only ones follow, like the tabs.
+        controls = targets;
+        controlCount = static_cast<int>(controls.size());
+        for (size_t index = 0; index < spec.controls.size(); ++index) {
+            if (spec.controls[index].enabled && spec.controls[index].touchOnly) {
                 targets.push_back({spec.controls[index].rect,
                                    static_cast<int>(index), false});
             }
@@ -2884,13 +2913,6 @@ ScreenResult runScreen(const ScreenSpec &spec, int &focus)
                      ScreenAction, true});
             }
         }
-        controls.clear();
-        for (const Target &target : targets) {
-            if (!target.tab) {
-                controls.push_back(target);
-            }
-        }
-        controlCount = static_cast<int>(controls.size());
         current = controlCount > 0 ? 0 : -1;
         for (int index = 0; index < controlCount; ++index) {
             if (controls[index].choice == keep) {
@@ -2989,9 +3011,16 @@ ScreenResult runScreen(const ScreenSpec &spec, int &focus)
             }
             const Control &control = spec.controls[target.choice];
             const bool down = showPressed == static_cast<int>(index);
+            if (control.touchOnly) {
+                continue; // drawBottom drew it
+            }
             if (control.tile) {
                 drawTile(control.rect, control.label, control.icon,
                          control.iconColor, down);
+            } else if (control.tool) {
+                drawToolButton(control.rect, control.label, control.icon,
+                               control.iconColor, true, control.labelColor,
+                               down);
             } else {
                 drawButton(control.rect, control.label, control.style,
                            control.scale, control.icon, control.iconColor,
@@ -3000,7 +3029,13 @@ ScreenResult runScreen(const ScreenSpec &spec, int &focus)
         }
         for (size_t index = 0; index < spec.controls.size(); ++index) {
             const Control &control = spec.controls[index];
-            if (!control.enabled) {
+            if (control.enabled || control.touchOnly) {
+                continue;
+            }
+            if (control.tool) {
+                drawToolButton(control.rect, control.label, control.icon,
+                               control.iconColor, false, 0, false);
+            } else {
                 drawButton(control.rect, control.label, Style::Disabled,
                            control.scale);
             }
@@ -3021,14 +3056,14 @@ ScreenResult runScreen(const ScreenSpec &spec, int &focus)
         }
         if (current >= 0) {
             const Control &control = spec.controls[controls[current].choice];
-            drawFocus(control.rect, control.tile ? 10
-                                    : control.rect.h >= 34 ? 9
-                                                           : 8);
+            drawFocus(control.rect, control.tile                       ? 10
+                                    : !control.tool && control.rect.h >= 34 ? 9
+                                                                          : 8);
         }
         // Badges sit on the top right corner, as the HOME Menu marks new
         // icons, over the focus ring so it never hides them.
         for (const Control &control : spec.controls) {
-            if (control.badge.empty()) {
+            if (control.badge.empty() || !control.enabled) {
                 continue;
             }
             const Rect &area = control.rect;
@@ -3068,6 +3103,11 @@ int menu(const std::vector<MenuItem> &items,
             Control control;
             control.rect = {26, top + index * pitch, 268, 38};
             control.label = items[index].label;
+            control.icon = items[index].icon;
+            control.iconColor = items[index].iconColor;
+            control.scale = items[index].icon == Icon::None
+                                ? type::Button
+                                : type::Body + 0.04f;
             control.enabled = items[index].enabled;
             control.labelColor = items[index].danger ? color::Bad : 0;
             spec.controls.push_back(control);
@@ -3083,6 +3123,8 @@ int menu(const std::vector<MenuItem> &items,
             control.rect = {index % 2 == 0 ? 16.0f : 164.0f,
                             top + (index / 2) * pitch, 140, height};
             control.label = items[index].label;
+            control.icon = items[index].icon;
+            control.iconColor = items[index].iconColor;
             control.scale = type::Small + 0.06f;
             control.enabled = items[index].enabled;
             control.labelColor = items[index].danger ? color::Bad : 0;
@@ -3103,6 +3145,175 @@ int menu(const std::vector<MenuItem> &items,
     };
     const ScreenResult result = runScreen(spec, focus);
     return result.choice >= 0 ? result.choice : -1;
+}
+
+namespace {
+
+// Where a sheet's two segments sit, and their L and R caps.
+constexpr Rect SegmentTrack = {8, 6, 304, 28};
+
+Rect segmentRect(int page)
+{
+    return {SegmentTrack.x + 24 + page * 130.0f, SegmentTrack.y + 3, 126,
+            SegmentTrack.h - 6};
+}
+
+void drawSegments(const std::vector<SheetPage> &pages, int shown)
+{
+    drawRecess(SegmentTrack);
+    const u32 capColor = color::InkSoft;
+    const Rect line = {0, SegmentTrack.y, 0, SegmentTrack.h};
+    // Each cap centred in the 24 px at its end of the track.
+    for (const char *key : {"L", "R"}) {
+        const float width = keyCapWidth(key) - (buttonGlyph(key).empty() ? 5 : 4);
+        const float end = key[0] == 'L' ? SegmentTrack.x
+                                        : SegmentTrack.x + SegmentTrack.w - 24;
+        drawKeyCap(key, end + (24 - width) / 2, line, capColor,
+                   color::rgb(0xFFFFFF));
+    }
+    for (int page = 0; page < 2; ++page) {
+        const Rect area = segmentRect(page);
+        const bool on = page == shown;
+        if (on) {
+            drawButtonBody(area, 6, Style::Normal, false);
+        }
+        const SheetPage &each = pages[page];
+        const u32 ink = on ? color::InkButton : color::InkSoft;
+        constexpr float IconSize = 16;
+        constexpr float Scale = 0.5f;
+        const float room = area.w - 16 - IconSize - 4;
+        const float width = IconSize + 4 + std::min(room, textWidth(each.name, Scale));
+        const float x = area.x + (area.w - width) / 2;
+        drawIcon(each.icon, x, area.y + (area.h - IconSize) / 2, IconSize,
+                 on ? each.iconColor : withAlpha(each.iconColor, 0.6f));
+        drawMarquee(each.name, x + IconSize + 4,
+                    area.y + (area.h - lineHeight(Scale)) / 2 + 1, Scale, ink, room);
+    }
+}
+
+} // namespace
+
+SheetResult runSheet(const std::vector<SheetPage> &pages, int page)
+{
+    SheetResult result;
+    if (pages.empty()) {
+        return result;
+    }
+    const bool segmented = pages.size() > 1;
+    page = std::max(0, std::min(page, segmented ? 1 : 0));
+    // Each page remembers where the ring was, for coming back to it.
+    std::vector<int> focus(pages.size(), -1);
+    constexpr float LeadHeight = 36;
+    constexpr float ToolHeight = 46;
+    constexpr float Gap = 12;
+    constexpr int SegmentChoice = -100; // ids[] for a segment: this - page
+    while (keepRunning()) {
+        const SheetPage &shown = pages[page];
+        ScreenSpec spec;
+        spec.back = "Back";
+        std::vector<int> ids;
+        const auto add = [&](const Control &control, int id) {
+            spec.controls.push_back(control);
+            ids.push_back(id);
+        };
+        const size_t leads = std::min<size_t>(2, shown.lead.size());
+        const size_t rows = std::min<size_t>(2, shown.rows.size());
+        const float top = segmented ? SegmentTrack.y + SegmentTrack.h : 0;
+        const float block = (leads > 0 ? LeadHeight + (rows > 0 ? Gap : 0) : 0) +
+                            rows * ToolHeight + (rows > 1 ? Gap : 0);
+        float y = top + std::max(6.0f, (204 - top - block) / 2);
+        const auto control = [](const Option &option, const Rect &rect) {
+            Control made;
+            made.rect = rect;
+            made.label = option.label;
+            made.icon = option.icon;
+            made.iconColor = option.iconColor;
+            made.enabled = option.enabled;
+            made.labelColor = option.danger ? color::Bad : 0;
+            made.badge = option.badge;
+            return made;
+        };
+        // Two lead buttons share the row by how long their labels are, so
+        // "Install and Delete" fits beside "Install" without scrolling: the
+        // spare room is split, or when there is none the shorter keeps just
+        // what it needs and the longer takes the rest.
+        const float leadScale = leads == 1 ? type::Body : type::Small;
+        float widths[2] = {304, 148};
+        if (leads == 2) {
+            float wanted[2];
+            for (size_t index = 0; index < 2; ++index) {
+                wanted[index] = textWidth(shown.lead[index].label, leadScale) +
+                                (shown.lead[index].icon == Icon::None ? 18 : 44);
+            }
+            const float spare = 304 - 8 - wanted[0] - wanted[1];
+            const int shorter = wanted[0] <= wanted[1] ? 0 : 1;
+            for (size_t index = 0; index < 2; ++index) {
+                widths[index] = spare >= 0 ? wanted[index] + spare / 2 : 148;
+            }
+            if (spare < 0 && wanted[shorter] < 148) {
+                widths[shorter] = wanted[shorter];
+                widths[1 - shorter] = 296 - wanted[shorter];
+            }
+        }
+        float x = 8;
+        for (size_t index = 0; index < leads; ++index) {
+            Control made = control(shown.lead[index], {x, y, widths[index], LeadHeight});
+            made.scale = leadScale;
+            add(made, shown.lead[index].id);
+            x += widths[index] + 8;
+        }
+        if (leads > 0) {
+            y += LeadHeight + Gap;
+        }
+        for (size_t row = 0; row < rows; ++row) {
+            const std::vector<Option> &options = shown.rows[row];
+            const float count = static_cast<float>(std::max<size_t>(1, options.size()));
+            const float width = (304 - (count - 1) * 8) / count;
+            for (size_t index = 0; index < options.size(); ++index) {
+                Control made = control(options[index],
+                                       {8 + index * (width + 8), y, width, ToolHeight});
+                made.tool = true;
+                add(made, options[index].id);
+            }
+            y += ToolHeight + Gap;
+        }
+        if (segmented) {
+            for (int other = 0; other < 2; ++other) {
+                Control segment;
+                segment.rect = segmentRect(other);
+                segment.touchOnly = true;
+                segment.enabled = other != page;
+                add(segment, SegmentChoice - other);
+            }
+            spec.extraKeys = KEY_L | KEY_R;
+            spec.drawBottom = [&]() { drawSegments(pages, page); };
+        }
+        spec.drawTop = shown.drawTop;
+        int at = focus[page];
+        if (at < 0) {
+            for (size_t index = 0; index < spec.controls.size(); ++index) {
+                if (spec.controls[index].enabled && !spec.controls[index].touchOnly) {
+                    at = static_cast<int>(index);
+                    break;
+                }
+            }
+        }
+        const ScreenResult chosen = runScreen(spec, at);
+        focus[page] = at;
+        if (chosen.choice == ScreenKey) {
+            page = (chosen.key & KEY_L) != 0 ? 0 : 1;
+            continue;
+        }
+        if (chosen.choice >= 0 && ids[chosen.choice] <= SegmentChoice) {
+            page = SegmentChoice - ids[chosen.choice];
+            continue;
+        }
+        result.page = page;
+        result.id = chosen.choice >= 0 ? ids[chosen.choice] : -1;
+        return result;
+    }
+    result.page = page;
+    return result;
 }
 
 int chooseOption(const std::string &title,

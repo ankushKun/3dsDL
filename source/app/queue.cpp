@@ -1054,9 +1054,9 @@ void App::queueScreen()
         }
         const QueuedLink item = queue_[result.index];
         const int choice = ui::menu(
-            {{"Download Now", false, true},
-             {"Remove", true, true},
-             {"Remove All", true, true}},
+            {{"Download Now", false, true, ui::Icon::Download, ui::color::IconGreen},
+             {"Remove", true, true, ui::Icon::Trash, ui::color::IconRed},
+             {"Remove All", true, true, ui::Icon::Trash, ui::color::IconRed}},
             [&](int) {
                 ui::drawTopChrome("Queue", ui::Icon::Download,
                                   ui::color::IconGreen);
@@ -1920,11 +1920,14 @@ void App::receivedOptions(net::ReceiveLog::Row row, const std::string &address)
     std::vector<ui::MenuItem> items;
     if (installable) {
         options = {Option::Install, Option::InstallAndDelete};
-        items = {{"Install"}, {"Install and Delete File"}};
+        items = {{"Install", false, true, ui::Icon::Download, ui::color::IconGreen},
+                 {"Install and Delete File", false, true, ui::Icon::Download,
+                  ui::color::IconGreen}};
     }
     if (there) {
         options.push_back(Option::Show);
-        items.push_back({"Show in Files"});
+        items.push_back({"Show in Files", false, true, ui::Icon::Folder,
+                         ui::color::IconOrange});
     }
     const std::vector<ui::Fact> facts = rowFacts(row);
     const int choice = ui::menu(items, [&](int) {

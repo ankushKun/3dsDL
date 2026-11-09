@@ -52,10 +52,27 @@ ICONS = [
     ("Star", '<path fill="#fff" d="M12 3.6L14.29 9.44L20.56 9.82L15.71 13.81L17.29 19.88L12 16.5L6.71 19.88L8.29 13.81L3.44 9.82L9.71 9.44Z"/>'),
     # The same star, not filled: what R would add.
     ("StarOutline", '<path d="M12 3.6L14.29 9.44L20.56 9.82L15.71 13.81L17.29 19.88L12 16.5L6.71 19.88L8.29 13.81L3.44 9.82L9.71 9.44Z"/>'),
+    # Option sheets: what a press does, drawn the way the system's own
+    # icons for these are.
+    ("Cut", '<circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/><path d="M8.3 15.7L18 4M15.7 15.7L6 4"/>'),
+    ("Copy", '<rect x="8.5" y="8.5" width="11" height="11" rx="1.5"/><path d="M15.5 8.5V6a1.5 1.5 0 0 0-1.5-1.5H6A1.5 1.5 0 0 0 4.5 6v8A1.5 1.5 0 0 0 6 15.5h2.5"/>'),
+    ("Paste", '<path d="M9 4.5H7A1.5 1.5 0 0 0 5.5 6v13A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V6A1.5 1.5 0 0 0 17 4.5h-2"/><rect x="9" y="3" width="6" height="3.5" rx="1"/><path d="M9 11.5h6M9 15h4"/>'),
+    ("Rename", '<path d="M15 5l4 4L8.5 19.5H4.5v-4z"/><path d="M13 7l4 4"/>'),
+    ("Info", '<circle cx="12" cy="12" r="8"/><path d="M12 11v5"/><path d="M12 7.6v.4"/>'),
+    ("Box", '<rect x="5" y="5" width="14" height="14" rx="2.5"/>'),
+    ("BoxCheck", '<rect x="5" y="5" width="14" height="14" rx="2.5"/><path d="M8.5 12.2l2.4 2.4 4.6-5"/>'),
+    ("SelectAll", '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4.5 15.5V6.5a2 2 0 0 1 2-2h9"/><path d="M11 14l2 2 3.8-4"/>'),
+    ("DeselectAll", '<rect x="8" y="8" width="12" height="12" rx="2"/><path d="M4.5 15.5V6.5a2 2 0 0 1 2-2h9"/>'),
+    ("NewFolder", '<path d="M3.5 7.5a1.5 1.5 0 0 1 1.5-1.5h4l2 2h8a1.5 1.5 0 0 1 1.5 1.5v8a1.5 1.5 0 0 1-1.5 1.5H5a1.5 1.5 0 0 1-1.5-1.5z"/><path d="M12 10.5v5M9.5 13h5"/>'),
+    ("NewFile", '<path d="M7 3.5h7l4.5 4.5v11a1.5 1.5 0 0 1-1.5 1.5H7A1.5 1.5 0 0 1 5.5 19V5A1.5 1.5 0 0 1 7 3.5z"/><path d="M12 10.5v6M9 13.5h6"/>'),
+    ("Play", '<path d="M8 5.5v13l10.5-6.5z"/>'),
+    ("Seed", '<path d="M12 20v-8"/><path d="M12 12c0-4 2.5-6.5 7-6.5 0 4.5-2.5 6.5-7 6.5z"/><path d="M12 14.5c0-3-2-5-6-5 0 3.5 2 5 6 5z"/>'),
 ]
 
 SIZES = [64, 32, 24, 18]
-ATLAS = 512
+# Wide, so every size of every icon fits above the shapes.
+ATLAS_W = 1024
+ATLAS_H = 512
 # Shapes the toolkit cuts rounded corners and rings from, in the last row:
 # a disc, then rings whose stroke is this share of their radius.
 SHAPE_ROW = 448
@@ -69,7 +86,7 @@ def layout():
     cells = []  # (name, size, x, y)
     y = 0
     for size in SIZES:
-        per_row = ATLAS // size
+        per_row = ATLAS_W // size
         for index, (name, _) in enumerate(ICONS):
             row, column = divmod(index, per_row)
             cells.append((name, size, column * size, y + row * size))
@@ -123,7 +140,8 @@ def header(cells):
     ]
     for name, _ in ICONS:
         lines.append(f"    {name},")
-    lines += ["    None,", "};", "", f"constexpr int IconAtlasSize = {ATLAS};",
+    lines += ["    None,", "};", "", f"constexpr int IconAtlasWidth = {ATLAS_W};",
+              f"constexpr int IconAtlasHeight = {ATLAS_H};",
               f"constexpr int IconSizeCount = {len(SIZES)};",
               "constexpr int IconSizes[IconSizeCount] = {"
               + ", ".join(str(s) for s in SIZES) + "};", "",
@@ -160,7 +178,7 @@ def main():
             CHROME, "--headless=new", "--disable-gpu", "--hide-scrollbars",
             "--force-device-scale-factor=1",
             "--default-background-color=00000000",
-            f"--window-size={ATLAS},{ATLAS}", f"--screenshot={out}",
+            f"--window-size={ATLAS_W},{ATLAS_H}", f"--screenshot={out}",
             "file://" + page,
         ], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     with open(os.path.join(ROOT, "source", "app", "icon_atlas.hpp"), "w") as handle:
