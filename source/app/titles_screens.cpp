@@ -860,12 +860,15 @@ bool App::confirmUnsavedTickets(const std::vector<uint64_t> &tickets,
     const bool looked = tasks::busy(
         "Tickets", "Looking at the tickets...",
         [&](tasks::Busy &busy) {
-            busy.total = tickets.size();
             const titles::Index index = titles::indexOf(library_.titles);
             const std::vector<std::string> folders = checkpointFolders();
             const std::set<uint64_t> personal = library::personalTickets();
             const std::map<uint64_t, FoundCia> cias =
                 ciasOnCard(settings_.destination, busy.cancel);
+            // Counted from here: the reads above have no count of their own,
+            // and a bar stuck at none of them for their seconds says less
+            // than the spinner.
+            busy.total = tickets.size();
             for (const uint64_t id : tickets) {
                 if (busy.cancel.load()) {
                     return;
