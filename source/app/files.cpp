@@ -1416,8 +1416,16 @@ void App::browseFiles(const std::string &select)
             continue;
         }
         if (result.key == KEY_Y) {
+            // Options are for the row the cursor is on, and for the whole
+            // selection when that row is in it. Otherwise one selected entry
+            // looked like the options of the row pointed at, saying
+            // Deselect for a row that was never selected.
+            const bool onSelected =
+                std::find(marked.begin(), marked.end(), highlighted) != marked.end();
             const std::vector<std::string> targets =
-                marked.empty() ? std::vector<std::string>{highlighted} : marked;
+                marked.empty() || (onEntry && !onSelected)
+                    ? std::vector<std::string>{highlighted}
+                    : marked;
             const bool changed =
                 entryOptions(current, targets, marked, entries, complete);
             noteChanges(changed, targets);

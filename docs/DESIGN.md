@@ -142,7 +142,8 @@ a job of its own, as Files does, pages with the D-pad only. In every list a tap 
 a tap on the highlighted row opens it. Selected rows turn light blue and their
 icon becomes a blue check; in Files a tap on a row's icon or SELECT selects
 it, and the words are Select, Deselect and Select All (the code calls these
-rows marked, as highlighted is the cursor's row). The scrollbar's column takes a drag: the thumb follows the stylus, and
+rows marked, as highlighted is the cursor's row). Options act on the row the
+cursor is on, and on the whole selection when that row is selected. The scrollbar's column takes a drag: the thumb follows the stylus, and
 a touch on the track brings the thumb's middle there. A list that fills in
 while open keeps the row at the top of the view in place as rows arrive above
 it; only a list nobody has touched stays at its first row. A list can put
