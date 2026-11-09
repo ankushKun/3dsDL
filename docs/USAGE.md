@@ -49,16 +49,15 @@ curl -T game.cia -H 'X-Requested-With: 3dsDL' 'http://192.168.1.20/api/file?path
 
 Files browses the SD card. Tap a row to select it and tap again (or press <kbd>A</kbd>) to open it. Pictures fill the top screen, text and config files open in a line editor, ZIPs show their contents, CIAs (Azahar's compressed `.zcia` too) and tickets install, and anything else opens as hex.
 
-<kbd>Y</kbd> opens the options for an entry (rename, copy, cut, delete, install, properties, SHA-256), <kbd>SELECT</kbd> or a tap on an entry's icon marks several entries, and <kbd>START</kbd> has the folder options (paste, new folder or file, hidden files). Once something is cut or copied, <kbd>Y</kbd> in any folder starts with Move Here or Paste Here. When names are already taken you answer once for all of them, or for each; a folder meeting a folder of the same name merges into it. <kbd>X</kbd> (or Sort at the right of the folder's path) sorts by name, date, size or type, in either direction. Folders always come before files, and sorting by size adds up each folder in the background. Properties adds up a folder or the marked items.
+<kbd>Y</kbd> opens the options for an entry, or for the marked ones when it's on one of them. What the entry is for comes first (Install, Open, Extract, Edit), then the same two rows every time: Cut, Copy, Paste and Rename, then Select, Star, Info and Delete. What doesn't apply is dimmed in its place, so each one is always in the same spot. <kbd>R</kbd> or a tap on the folder's name at the top switches to the folder's options: New Folder, New File, Paste, Select All, Install (every CIA in the folder), Star, Info and Favourites; <kbd>START</kbd> opens them directly. <kbd>SELECT</kbd> or a tap on an entry's icon marks several entries. Paste shows how many items are waiting; a copy is pasted once. When names are already taken you answer once for all of them, or for each; a folder meeting a folder of the same name merges into it. Info adds up a folder or the marked items, and for a file has SHA-256 and Hex View. <kbd>X</kbd> (or Sort at the right of the folder's path) sorts by name, date, size or type, in either direction, and shows or hides hidden files. Folders always come before files, and sorting by size adds up each folder in the background.
 
 ## Titles
 
-Titles lists what's installed, like Data Management in System Settings.
+Titles is one list of the installed software, largest or A to Z (<kbd>X</kbd>, which also shows only the SD card or system memory). Each game counts its update and DLC. What is left of software that's gone, such as an unused ticket, extra data, an update without its game or an unfinished install, sits at the end with a badge saying what it is.
 
-- **Software** and **Updates and DLC** launch, delete, and fetch a game's seed. <kbd>X</kbd> sorts them by name or size, in either direction, and shows only the SD card or system memory (Software) or only updates or DLC.
-- **Save Data** and **Extra Data** back up, restore and browse. Backups go in `sdmc:/3ds/Checkpoint/saves/` and `.../extdata/`, named the way Checkpoint names them, so either app restores the other's. A restore backs up the current data first.
-- **Tickets** exports a title's ticket to `sdmc:/3ds/3dsDL/tickets/` or deletes unused ones. Install a `.tik` from Files.
-- **Clean Up** removes unfinished installs, which stop a CIA from installing again, and **Seeds** imports a `seeddb.bin`.
+<kbd>A</kbd> opens a title's page, with everything for it in one list: Launch, Save Data and Extra Data (back up, restore and browse), Get Seed, Export Ticket, then deleting the update, DLC, extra data or the software itself. Backups go in `sdmc:/3ds/Checkpoint/saves/` and `.../extdata/`, named the way Checkpoint names them, so either app restores the other's. A restore backs up the current data first. Deleting software keeps its ticket, which stays on the page until you delete it too; exported tickets go to `sdmc:/3ds/3dsDL/tickets/`. Install a `.tik` from Files.
+
+<kbd>Y</kbd> has the jobs for every title: Add Seeds from a `seeddb.bin`, Restore Deleted Tickets, Remove Unfinished Installs (which stop a CIA from installing again) and Delete Unused Tickets.
 
 System titles never appear, so they can't be deleted from here.
 
@@ -70,6 +69,8 @@ System titles never appear, so they can't be deleted from here.
 | Home | <kbd>START</kbd> | Exit |
 | Lists | <kbd>L</kbd> / <kbd>R</kbd> | Page up / down |
 | Files | <kbd>X</kbd> / <kbd>Y</kbd> / <kbd>SELECT</kbd> / <kbd>START</kbd> | Sort / options / mark / folder options |
+| Options | <kbd>L</kbd> / <kbd>R</kbd> | The entry's / the folder's options |
+| Titles | <kbd>X</kbd> / <kbd>Y</kbd> | Sort / options for every title |
 | Text editor | <kbd>A</kbd> / <kbd>X</kbd> / <kbd>Y</kbd> / <kbd>START</kbd> | Edit line / new line / delete line / save |
 | Pictures | <kbd>L</kbd> / <kbd>R</kbd> | Previous / next picture |
 

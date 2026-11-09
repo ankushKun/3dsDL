@@ -25,7 +25,9 @@ the system font itself, which is what makes it read as native.
    screen. Nothing on the top screen responds to input.
 2. **Few, large controls.** Embossed cream buttons 26 to 40 px tall, at most
    four or five choices per screen. Long lists page through a recessed panel
-   with a page counter instead of scrolling.
+   with a page counter instead of scrolling. An options sheet (below) holds
+   more, grouped so it reads as three: what the target is for, then two rows
+   of icon buttons that never move.
 3. **Back and OK live in the bottom corners.** Grey tabs, Back (or Cancel or
    Close) on the left, the screen's main action on the right. The home screen
    has one full-width Close bar instead. Tabs are pressed by their key or by
@@ -110,8 +112,7 @@ first guess is cap 15 at scale 0.72.
   ("SD 8.00 GiB" in the soft ink, orange under 256 MiB) just right of the
   pill, date and time right-aligned to x 362, battery at x 371.
 - Title row, y 24 to 50: icon and title centred, in 3dsDL blue.
-- Dotted divider at y 57. Over a sorted list (Files, Software, Updates and
-  DLC) its right end gives way to the order, "Largest First", in small
+- Dotted divider at y 57. Over a sorted list (Files, Titles) its right end gives way to the order, "Largest First", in small
   soft ink.
 - Info panel at x 17 to 383, y 69 to 225. Content screens (text editor, hex
   view, pictures) use the whole area below the title row instead.
@@ -123,7 +124,9 @@ first guess is cap 15 at scale 0.72.
   L Favourites); one that toggles shows the state it changes instead, so
   the two never read alike (Files: R as a star, outlined when R would add
   the entry, gold when it would take it away). They name buttons and take
-  no touch, so the bottom screen keeps a way to do the same.
+  no touch, so the bottom screen keeps a way to do the same. An options sheet's two pages are the
+  exception: L and R sit at the ends of its segments, which take touch, and
+  the corners stay empty.
 
 ### Bottom screen
 
@@ -148,8 +151,39 @@ a touch on the track brings the thumb's middle there. A list that fills in
 while open keeps the row at the top of the view in place as rows arrive above
 it; only a list nobody has touched stays at its first row. A list can put
 actions at the right end of its heading for what changes the whole list,
-each a key cap and a word in the heading's ink (Files' X Sort, matching the
-Software lists' X Sort tab), never a pill. A row on its way carries a thin progress bar along its foot.
+each a key cap and a word in the heading's ink (Files' and Titles' X Sort), never a pill. A row on its way carries a thin progress bar along its foot.
+
+### Options sheets
+
+What can be done with something (a file, a folder, a selection) is an
+options sheet (`ui::runSheet`), not a wall of text buttons:
+
+- **What it is for** leads: at most two wide buttons, a 20 px icon beside the
+  label (Install and Install and Delete for a CIA, Open and Extract for an
+  archive, Edit for text, Open for anything else). Two share the row by the
+  length of their labels.
+- **Two rows of icon buttons** follow, three or four to a row, each a 22 px
+  icon over a one-word label. Their places never move: what does not apply
+  is dimmed in place (the dashed disabled style), so Paste is always third
+  and Delete always last, bottom right, its label red. A count rides on a
+  corner badge (Paste's waiting items, Install's CIAs).
+- **Two targets, two pages.** The entry and the folder it is in are pages of
+  one sheet, switched by L and R or a tap on a segment at the top: a
+  recessed track with the shown page raised as a button, its icon and name,
+  and the L and R caps at the track's ends, as the system's tab bars show
+  them. The top screen shows the shown page's target. The ring stays in the
+  page; segments take touch and the shoulder keys only.
+- Layout: segments y 6 to 34; the lead row 36 px tall; rows 46 px; 12 px
+  between groups and 8 px between buttons; the block is centred in what is
+  left above the tabs.
+
+Lists of verbs, such as a title's page, are lists: the action as the row's
+label with its fact on the right (Save Data, 2 backups; Delete DLC, 240 MiB),
+the destructive ones last in red with a red trash icon. A list hides what
+does not apply instead of dimming it.
+
+Short menus of up to four actions (`ui::menu`) give each button an icon; in
+one menu, all have one or none do.
 
 ### Dialogs
 
@@ -173,7 +207,8 @@ strip for a red button and a 30 px dark Cancel strip.
 | Files | details of the highlighted entry; a picture's preview, a song's cover; L Favourites and R's star in the corner tabs | path, X Sort, six rows, Back, page counter, Options |
 | Already here | the folder, how many clash and their names, files and folders tagged | Replace All (Merge All for folders, Replace and Merge for both), Keep Both, Skip These, Ask for Each, Cancel; one clash asks Keep Both / Replace (Merge) / Skip |
 | Favourites | details of the highlighted favourite, as Files shows it; R's gold star in the corner tab | starred folders and files in the order they were starred, each with its folder, or Missing; Back, R Remove; A opens a folder, or a file's folder with it highlighted |
-| File options | the file the choices act on | eight small buttons in two columns |
+| Options | the entry the sheet acts on as Files shows it, or what the marked items add up to; on the folder's page its path, order, count, CIAs and clipboard | segments for the entry and its folder (L, R); the entry's page: what it is for, then Cut, Copy, Paste, Rename / Select, Star, Info, Delete; the folder's: New Folder, New File, then Paste, Select All, Install / Star, Info, Favourites |
+| Info | the entry's type, size, bytes and date, or the totals | dialog: OK / SHA-256 / Hex View for a file, OK otherwise |
 | Picture viewer | the picture, nothing else | name, size, position, Previous / Next |
 | Song viewer | title, cover, artist, album, length, track | name, format, position, Previous / Next |
 | Text editor | ruled page with line numbers, current line in blue | the full current line, Edit / New Line / Delete, Close / Save |
@@ -184,6 +219,9 @@ strip for a red button and a 30 px dark Cancel strip.
 | History | the highlighted download in full | rows with Installed, Resume, Saved, Failed badges |
 | Receive | QR code for the page, the address in large type and http://3ds.local under it; while a file is on its way, its progress as Downloading shows it, with the address at the end of the dotted line | what came in and went out since 3dsDL started, newest first: a bar on what is on its way, the size of what arrived, Installed, Failed, Sent, Queued and Stopped badges, Back, X Clear once something is done (it drops what is done, keeps what is on its way, and leaves the files) |
 | Tickets without a backup | for one: its software (installed, remembered from when it was, from a Checkpoint folder or a CIA on the card), Title ID, bought here, issued for, a CIA that restores it, why no backup; for several: each one's name and whether it was bought here or has a CIA | destructive dialog: Delete Anyway / Keep, starting on Keep |
+| Titles | the highlighted row: icon, name, publisher, Title ID, version (its update's when installed), size of the game with its update and DLC; for what is left of software that is gone, what is left | heading with the count and size and X Sort; software rows with sizes, then leftovers with a badge (Unused, Update, DLC, Ticket, Extra Data, Unfinished); Back, Y Options |
+| Title page | the title as the list shows it | a list of verbs: Launch, Save Data, Extra Data, Get Seed, Export Ticket, then in red Remove Unfinished Install, Delete Update, Delete DLC, Delete Extra Data, Delete Ticket, Delete Software |
+| Titles options | seeddb.bin, saved deleted tickets, unfinished installs, unused tickets | Add Seeds, Restore Deleted Tickets, Remove Unfinished Installs, Delete Unused Tickets |
 | Received row | the row's name and facts | Install, Install and Delete File, Show in Files |
 | Sent links | names and the host each link leads to after its redirects, who sent them, where they go | dialog: Download / Add to Queue / Cancel, starting on Cancel unless 3dsDL's own page sent them; Don't Allow in place of Add to Queue once a device's links were cancelled |
 | Sent replace | the file, its host, the sender, the app, its folder and the name the new one was kept as | dialog: Keep Both / Replace, starting on Keep Both; only for the same app |

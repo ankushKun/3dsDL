@@ -44,7 +44,7 @@
 - Manages the SD card from a phone or computer's browser: upload, download, edit, move, copy and delete files, and install uploaded CIAs, with no FTP app. Also answers at `http://3ds.local/`.
 - A queue for scanning many QR codes in a row and downloading them together.
 - Files: a file manager with favourites, a picture viewer, a text editor, ZIP extraction, a hex view and SHA-256 checks.
-- Titles: launch and delete installed software, manage tickets and seeds, and clear stuck installs.
+- Titles: one list of installed software, each with a page to launch it, back up its saves, export its ticket or delete it, plus seeds, unused tickets and stuck installs.
 - Save data and extra data backup, restore and browsing, compatible with Checkpoint's backups.
 - Updates itself from GitHub releases, checking each download against its SHA-256 checksum.
 
