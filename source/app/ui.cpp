@@ -2008,11 +2008,11 @@ constexpr float WideTabWidth = 150;
 constexpr float KeyScale = 0.36f;
 constexpr float GlyphScale = 0.56f;
 
-// The system font's own A, B, X or Y button (U+E000 to U+E003) as UTF-8,
-// or "" for other keys and for fonts without them, such as Azahar's.
+// The system font's own A, B, X, Y, L or R button (U+E000 to U+E005) as
+// UTF-8, or "" for other keys and for fonts without them, such as Azahar's.
 std::string buttonGlyph(const std::string &key)
 {
-    static const char Keys[] = "ABXY";
+    static const char Keys[] = "ABXYLR";
     if (key.size() != 1) {
         return "";
     }
@@ -2169,8 +2169,9 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
     const float top = TopPanel.y + TopPanel.h;
     const float height = ScreenHeight - top;
     const float radius = height / 2;
-    // The key as HOME Menu shows L and R: the button's outline with its
-    // letter, filled in while the button is held.
+    // The key as HOME Menu shows L and R: the system font's own L and R,
+    // or where the font has none (Azahar) the button's outline with its
+    // letter; either sits on a white key while the button is held.
     constexpr float CapWidth = 13;
     constexpr float CapHeight = 11;
     constexpr float CapRadius = 3;
@@ -2186,11 +2187,37 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
     constexpr float Outer = 5; // from the screen's edge to the cap
     constexpr float Inner = 9; // clear of the rounded corner
     const float middle = top + 1 + (height - 1) / 2;
+    // Sized as the nav tabs' glyphs are for their 16 px caps, scaled to the
+    // strip's 11.
+    const float glyphScale = GlyphScale * CapHeight / 16;
+    const auto capWidth = [&](const char *letter) {
+        const std::string glyph = buttonGlyph(letter);
+        return glyph.empty() ? CapWidth : textWidth(glyph, glyphScale);
+    };
     const auto drawCap = [&](const char *letter, u32 key, float x) {
+        const bool held = (heldKeys & key) != 0;
+        const std::string glyph = buttonGlyph(letter);
+        if (!glyph.empty()) {
+            const float width = textWidth(glyph, glyphScale);
+            if (held) {
+                // A little larger than the glyph's ink, so it frames it
+                // whatever the glyph's own margins are.
+                const fontGlyphPos_s ink = glyphPos(0xE004 + (letter[0] == 'R'));
+                const float k = fontScale * glyphScale * TextBoost;
+                const float inkWidth = ink.width * k;
+                fillRound({std::round(x + ink.xOffset * k - 2), top + 2,
+                           std::round(inkWidth + 4), height - 3},
+                          CapRadius, color::rgb(0xFFFFFF));
+            }
+            drawText(glyph, x,
+                     std::round(middle - lineHeight(glyphScale) / 2 + 1),
+                     glyphScale,
+                     held ? color::rgb(0x6C6C6C) : color::rgb(0xFFFFFF));
+            return x + width + Gap;
+        }
         // Whole pixels, so the one-pixel outline stays sharp.
         const Rect cap = {x, std::round(middle - CapHeight / 2), CapWidth,
                           CapHeight};
-        const bool held = (heldKeys & key) != 0;
         if (held) {
             fillRound(cap, CapRadius, color::rgb(0xFFFFFF));
         } else {
@@ -2223,7 +2250,7 @@ void drawShoulderKeys(const ShoulderKey &left, const ShoulderKey &right)
         if (key.label.empty() && key.icon == Icon::None) {
             return;
         }
-        float content = CapWidth;
+        float content = capWidth(letter);
         if (key.icon != Icon::None) {
             content += Gap + IconSize;
         }
