@@ -86,12 +86,14 @@ button{font:inherit}
 .group{display:flex;flex-direction:column;gap:2px}
 .group h3{margin:0;padding:0 10px 4px;font-size:12px;font-weight:700;color:var(--soft)}
 .nav a{display:flex;align-items:center;gap:10px;min-height:34px;padding:0 10px;border-radius:9px;text-decoration:none;font-size:14px;font-weight:550;color:var(--ink);transition:background .15s}
-.nav a span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nav a>span:not(.ic){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .nav a .i{color:#7d7563}
-.nav a .i.star{color:#c99a12}
 .nav a:hover{background:#fffdf055}
 .nav a.on{font-weight:700;color:var(--text);background:linear-gradient(#fffdf4,#f1ecd6);box-shadow:0 1px 2px #0002,inset 0 1px 0 #fff}
-.nav a.on .i:not(.star){color:var(--deep)}
+.nav a.on .i{color:var(--deep)}
+.nav .ic{--s:20px}
+.nav .ic .doc b{font-size:0;width:9px;height:3px;padding:0}
+.nav a small{flex:none;max-width:45%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:550;color:var(--soft)}
 .badge{min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:#d97a0a;color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;flex:none}
 body.gated .places a{color:#9a9172;pointer-events:none}
 body.gated .places .i{color:#b0a77f}
@@ -273,7 +275,7 @@ input[type=checkbox]{width:16px;height:16px;margin:0;accent-color:var(--blue);fl
 .tmini .line{display:flex;gap:8px;min-width:0;font-size:12px;color:var(--soft);font-variant-numeric:tabular-nums}
 .tmini .line b{flex:1;min-width:0;font-size:13px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .tmini .line span:first-child{flex:1}
-.pathbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:10px 18px 14px;border-top:1px dotted var(--dots);font-size:13px}
+.pathbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;padding:9px 18px;border-bottom:1px dotted var(--dots);font-size:13px}
 .crumbs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;flex:1;min-width:0}
 .crumbs a,.crumbs span{padding:2px 6px;border-radius:6px;font-weight:650;text-decoration:none;overflow-wrap:anywhere}
 .crumbs span{color:var(--text)}
@@ -395,7 +397,8 @@ body.drawer .scrim{display:block;position:fixed;inset:0;z-index:45;background:#2
 .grid .ic{--s:60px}
 .lhead,.list .item{grid-template-columns:30px minmax(0,1fr) 84px;padding:0 6px}
 .list .kd,.list .dt,.lhead .c-kd,.lhead .c-dt{display:none}
-.pathbar{padding:10px 14px 120px}
+.pathbar{padding:8px 14px}
+#browser{padding-bottom:120px}
 .pad{padding:14px 12px 110px}
 dialog.sheet{margin:auto 0 0;width:100vw;max-width:100vw;border-radius:20px 20px 0 0;padding-bottom:env(safe-area-inset-bottom)}
 .cols{height:min(300px,46vh)}
@@ -436,13 +439,14 @@ const char *const PageEnd = R"PAGE(<form method="post" action="/send" class="wel
 <label class="check" style="margin-top:16px"><input type="checkbox" id="offer" checked>Offer to install CIAs on the 3DS once they arrive</label></div>
 </section>
 <section class="view" id="files" hidden>
-<header class="bar"><div class="seg tool nav2"><button type="button" id="back" aria-label="Back"></button><button type="button" id="fwd" aria-label="Forward"></button></div>
+<header class="bar"><div class="seg tool nav2"><button type="button" id="back" aria-label="Back"></button><button type="button" id="fwd" aria-label="Forward"></button><button type="button" id="up" aria-label="Enclosing Folder" title="Enclosing Folder"></button></div>
 <h1 id="title">SD Card</h1><span class="grow"></span>
 <div class="seg tool views" role="group" aria-label="View"><button type="button" id="asgrid" aria-label="Icons"></button><button type="button" id="aslist" aria-label="List"></button></div>
 <button class="btn tool" id="sortbtn" aria-haspopup="menu"></button>
 <label class="search tool"><input type="search" id="filter" autocomplete="off" aria-label="Search this folder"></label>
 <button class="btn icon tool" id="mkdir" aria-label="New Folder" title="New Folder"></button>
 <label class="btn primary tool" id="upbtn" title="Upload files (U)"><input type="file" id="pick" multiple hidden></label><span class="brk"></span><input type="file" id="pickdir" webkitdirectory multiple hidden></header>
+<div class="pathbar" id="pathbar" hidden><nav class="crumbs" id="crumbs" aria-label="Path"></nav><span id="count"></span></div>
 <div class="ccard" id="ccard" hidden></div>
 <div class="gate" id="gate" hidden></div>
 <div class="body" id="browser" hidden>
@@ -452,7 +456,6 @@ const char *const PageEnd = R"PAGE(<form method="post" action="/send" class="wel
 <div class="dropzone" id="dropzone"><span></span><b></b></div></section>
 <aside class="insp" id="insp"><div class="panel" id="detail"></div><div class="tmini" hidden></div></aside>
 </div>
-<footer class="pathbar" id="pathbar" hidden><nav class="crumbs" id="crumbs" aria-label="Path"></nav><span id="count"></span></footer>
 </section>
 </div>
 </div>
@@ -525,7 +528,7 @@ const FOLDER = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2.5 7a1.8 
 const CUBE = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8l8-4 8 4-8 4zM4 8v8l8 4 8-4V8M12 12v8"/></svg>';
 for (const img of $$('.logoimg')) img.src = document.querySelector('link[rel=icon]').href;
 for (const a of $$('#ext a')) a.insertAdjacentHTML('beforeend', svg('out'));
-for (const [id, name] of [['back', 'left'], ['fwd', 'right'], ['asgrid', 'grid'], ['aslist', 'list'], ['mkdir', 'folderplus'], ['menubtn', 'panel'], ['vclose', 'x'], ['eclose', 'x'], ['vprev', 'left'], ['vnext', 'right']]) $('#' + id).innerHTML = svg(name);
+for (const [id, name] of [['back', 'left'], ['fwd', 'right'], ['up', 'upward'], ['asgrid', 'grid'], ['aslist', 'list'], ['mkdir', 'folderplus'], ['menubtn', 'panel'], ['vclose', 'x'], ['eclose', 'x'], ['vprev', 'left'], ['vnext', 'right']]) $('#' + id).innerHTML = svg(name);
 $('#upbtn').insertAdjacentHTML('afterbegin', svg('upload') + '<span class="word">Upload</span>');
 $('#pmkdir').innerHTML = svg('folderplus') + 'New Folder';
 $('.search').insertAdjacentHTML('afterbegin', svg('search'));
@@ -849,6 +852,7 @@ const go = path => { location.hash = '#files:' + enc(path); };
 addEventListener('hashchange', route);
 $('#back').onclick = () => { if (N.at > 0) go(N.stack[N.at - 1]); };
 $('#fwd').onclick = () => { if (N.at < N.stack.length - 1) go(N.stack[N.at + 1]); };
+$('#up').onclick = () => { if (F.cwd !== '/') go(parent(F.cwd)); };
 $('#menubtn').onclick = () => document.body.classList.toggle('drawer');
 $('#scrim').onclick = () => document.body.classList.remove('drawer');
 // The sidebar's folders and Files' favourites, asked for once the 3DS lets
@@ -859,11 +863,14 @@ async function places() {
   PL.asked = true;
   let j;
   try { j = await api('GET', '/api/places', undefined, 2); } catch (e) { PL.asked = false; return; }
-  const row = (p, icon) => '<a href="#files:' + enc(p.dir ? p.path : parent(p.path)) + '" data-place="' + esc(p.path) + '"' + (p.dir ? ' data-drop="' + esc(p.path) + '"' : ' data-file="1"') +
-    '>' + svg(icon, icon === 'star' ? 'solid star' : '') + '<span>' + esc(p.name) + '</span></a>';
+  // A favourite shows what it is, and its folder when another has its name.
+  const named = new Map();
+  for (const p of j.favorites) named.set(p.name.toLowerCase(), (named.get(p.name.toLowerCase()) || 0) + 1);
+  const row = (p, picture, where) => '<a href="#files:' + enc(p.dir ? p.path : parent(p.path)) + '" data-place="' + esc(p.path) + '"' + (p.dir ? ' data-drop="' + esc(p.path) + '"' : ' data-file="1"') +
+    (where === undefined ? '' : ' title="' + esc(p.path) + '"') + '>' + picture + '<span>' + esc(p.name) + '</span>' + (where ? '<small>' + esc(where) + '</small>' : '') + '</a>';
   const root = $('#places').firstElementChild.outerHTML;
-  $('#places').innerHTML = root + j.places.map(p => row(p, 'folder')).join('');
-  $('#favs').innerHTML = j.favorites.map(p => row(p, 'star')).join('');
+  $('#places').innerHTML = root + j.places.map(p => row(p, svg('folder'))).join('');
+  $('#favs').innerHTML = j.favorites.map(p => row(p, glyph(p), named.get(p.name.toLowerCase()) > 1 ? folderName(parent(p.path)) : '')).join('');
   $('#favgroup').hidden = !j.favorites.length;
   sideMarks();
 }
@@ -1060,6 +1067,7 @@ function titles() {
   $('#filter').placeholder = 'Search ' + name;
   $('#back').disabled = N.at <= 0;
   $('#fwd').disabled = N.at >= N.stack.length - 1;
+  $('#up').disabled = F.cwd === '/';
 }
 let watcher = null;
 function render(animate) {
@@ -1675,7 +1683,7 @@ function askClash(clash, total, dest, copying, here, source) {
 }
 
 // --- Dragging -----------------------------------------------------------------------
-// Items drag onto folders, the sidebar's places and the path at the bottom:
+// Items drag onto folders, the sidebar's places and the path at the top:
 // a move, or a copy with Option (Ctrl elsewhere). Files from the computer
 // dropped anywhere on the folder upload into it, or into a place dropped on.
 const DRAG = 'application/x-3dsdl';
