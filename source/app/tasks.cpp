@@ -355,7 +355,10 @@ void warmUp(const std::string &link)
 {
     stopWarmUp(true);
     WarmUp *job = new WarmUp;
-    job->request.url = link;
+    // A Drive link downloads from Drive's file host, so that is the host
+    // worth having ready.
+    const std::string drive = url::driveDownload(link);
+    job->request.url = drive.empty() ? link : drive;
     job->request.caFile = http::CaBundle;
     job->request.userAgent = http::UserAgent;
     job->request.cancel = &job->cancel;
