@@ -185,6 +185,129 @@ std::vector<uint64_t> unusedTickets(const std::vector<uint64_t> &tickets,
     return unused;
 }
 
+uint64_t Group::size() const
+{
+    uint64_t total = 0;
+    for (const Title *part : {software, update, dlc}) {
+        total += part != nullptr ? part->size : 0;
+    }
+    return total;
+}
+
+bool Group::hasTicket(uint64_t titleId) const
+{
+    return std::find(tickets.begin(), tickets.end(), titleId) != tickets.end();
+}
+
+std::vector<Group> groupTitles(const std::vector<Title> &installed,
+                               const std::vector<uint64_t> &tickets,
+                               const std::vector<uint64_t> &pending,
+                               const std::vector<uint64_t> &extData,
+                               const std::set<uint64_t> &unusedTickets,
+                               const std::set<uint64_t> &unusedExtData)
+{
+    std::vector<Group> groups;
+    std::map<uint64_t, size_t> byId;
+    const auto groupOf = [&](uint64_t titleId) -> Group & {
+        const uint64_t base = cia::baseTitle(titleId);
+        const auto found = byId.find(base);
+        if (found != byId.end()) {
+            return groups[found->second];
+        }
+        byId[base] = groups.size();
+        groups.emplace_back();
+        groups.back().id = base;
+        return groups.back();
+    };
+    for (const Title &title : installed) {
+        if (!isShown(title.id)) {
+            continue;
+        }
+        Group &group = groupOf(title.id);
+        const Title *&slot = isSoftware(title.id)        ? group.software
+                             : category(title.id) == 0x000e ? group.update
+                                                            : group.dlc;
+        if (slot == nullptr) { // the first of two copies, as on a game card
+            slot = &title;
+        }
+    }
+    for (const uint64_t ticket : tickets) {
+        if (isShown(ticket)) {
+            groupOf(ticket).tickets.push_back(ticket);
+        }
+    }
+    for (const uint64_t title : pending) {
+        if (isShown(title)) {
+            groupOf(title).pending.push_back(title);
+        }
+    }
+    // Extra data goes with the software of its unique ID, or with what is
+    // left of that software, or stands alone.
+    for (const uint64_t id : extData) {
+        Group *owner = nullptr;
+        for (Group &group : groups) {
+            if (group.id != 0 && isSoftware(group.id) &&
+                category(group.id) != 0x8004 && uniqueId(group.id) == id &&
+                (owner == nullptr || (group.installed() && !owner->installed()))) {
+                owner = &group;
+            }
+        }
+        if (owner == nullptr) {
+            groups.emplace_back();
+            owner = &groups.back();
+        }
+        owner->hasExtData = true;
+        owner->extData = id;
+    }
+    for (Group &group : groups) {
+        bool unused = group.software == nullptr && group.update == nullptr &&
+                      group.dlc == nullptr && group.pending.empty() &&
+                      (!group.tickets.empty() || group.hasExtData);
+        for (const uint64_t ticket : group.tickets) {
+            unused = unused && unusedTickets.count(ticket) != 0;
+        }
+        if (group.hasExtData) {
+            unused = unused && unusedExtData.count(group.extData) != 0;
+        }
+        group.unused = unused;
+    }
+    return groups;
+}
+
+void sortGroups(std::vector<Group> &groups, fs::SortOrder order, bool reverse)
+{
+    std::vector<std::pair<std::string, Group>> keyed;
+    keyed.reserve(groups.size());
+    for (Group &group : groups) {
+        keyed.emplace_back(text::lower(group.name), std::move(group));
+    }
+    std::stable_sort(keyed.begin(), keyed.end(), [&](const auto &a, const auto &b) {
+        const Group &left = a.second;
+        const Group &right = b.second;
+        if (left.installed() != right.installed()) {
+            return left.installed();
+        }
+        // Reversed, each part still keeps its place in the list.
+        const auto before = [&](const auto &x, const auto &y) {
+            if (order == fs::SortOrder::Size && x.second.size() != y.second.size()) {
+                return x.second.size() > y.second.size();
+            }
+            if (x.first != y.first) {
+                return x.first < y.first;
+            }
+            if (x.second.id != y.second.id) {
+                return x.second.id < y.second.id;
+            }
+            return x.second.extData < y.second.extData;
+        };
+        return reverse ? before(b, a) : before(a, b);
+    });
+    groups.clear();
+    for (auto &entry : keyed) {
+        groups.push_back(std::move(entry.second));
+    }
+}
+
 bool titleFromSdFolders(const std::string &high, const std::string &low,
                         uint64_t &titleId)
 {

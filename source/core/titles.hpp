@@ -91,6 +91,48 @@ std::vector<uint64_t> unusedTickets(const std::vector<uint64_t> &tickets,
                                     const std::vector<Title> &installed,
                                     const std::set<uint64_t> &onSdCard = {});
 
+// --- The Titles list -------------------------------------------------------------
+
+// One row of the Titles list: a piece of software with its update and DLC,
+// the tickets and extra data that belong to them and unfinished installs of
+// any of them; or, when the software is not installed, what is left of it.
+struct Group {
+    // The software's Title ID, which an update's or DLC's game shares; 0
+    // for extra data that belongs to nothing else here.
+    uint64_t id = 0;
+    const Title *software = nullptr;
+    const Title *update = nullptr;
+    const Title *dlc = nullptr;
+    std::vector<uint64_t> tickets; // of the software, its update and DLC
+    std::vector<uint64_t> pending; // unfinished installs of any of them
+    bool hasExtData = false;
+    uint64_t extData = 0;
+    // Nothing installed is left and every ticket and the extra data are
+    // unused by the rules of unusedTickets and extDataInUse.
+    bool unused = false;
+    std::string name; // the caller's, for sorting and showing
+
+    bool installed() const { return software != nullptr; }
+    // The software, its update and DLC.
+    uint64_t size() const;
+    bool hasTicket(uint64_t titleId) const;
+};
+
+// The list from what the console holds. unusedTickets and unusedExtData are
+// the ones the rules above call unused; only they make a group unused.
+// Pointers into installed stay in the groups.
+std::vector<Group> groupTitles(const std::vector<Title> &installed,
+                               const std::vector<uint64_t> &tickets,
+                               const std::vector<uint64_t> &pending,
+                               const std::vector<uint64_t> &extData,
+                               const std::set<uint64_t> &unusedTickets,
+                               const std::set<uint64_t> &unusedExtData);
+
+// Installed software first, then what is left of software that is gone,
+// each by name (A to Z) or size (largest first); reverse flips each part.
+// Ties go by name, then ID.
+void sortGroups(std::vector<Group> &groups, fs::SortOrder order, bool reverse);
+
 // The title of an SD card folder Nintendo 3DS/<id0>/<id1>/title/<high>/<low>,
 // from its two 8-digit hex names, or false when they are not.
 bool titleFromSdFolders(const std::string &high, const std::string &low,

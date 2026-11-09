@@ -237,3 +237,102 @@ TEST("titles: names of software once installed are remembered")
     CHECK(titles::rememberNames(names, installed));
     CHECK_EQ(titles::rememberedName(0x0004000003D5F100ULL, names), std::string("3dsFM 2"));
 }
+
+TEST("titles: the list groups each game with what belongs to it")
+{
+    std::vector<titles::Title> installed = {
+        title(Game, "Pilotwings"), title(GameUpdate, ""), title(GameDlc, ""),
+        title(DsiWare, "Flipnote"), title(HomeMenu, "HOME Menu")};
+    installed[0].size = 100;
+    installed[1].size = 20;
+    installed[2].size = 3;
+    // A game that is gone, with its ticket and extra data left behind; an
+    // update for a game card that is not in; extra data of nothing known.
+    constexpr uint64_t Gone = 0x0004000000077700ULL;
+    constexpr uint64_t CardUpdate = 0x0004000E00088800ULL;
+    installed.push_back(title(CardUpdate, ""));
+    const std::vector<uint64_t> tickets = {Game, GameUpdate, GameDlc, Gone,
+                                           0x00048004AAAAAAAAULL};
+    const std::vector<uint64_t> extData = {titles::uniqueId(Game),
+                                           titles::uniqueId(Gone), 0x00ABCULL};
+    const std::vector<uint64_t> pending = {0x0004000200999900ULL};
+    const std::vector<titles::Group> groups = titles::groupTitles(
+        installed, tickets, pending, extData, {Gone}, {titles::uniqueId(Gone), 0x00ABCULL});
+
+    const auto find = [&](uint64_t id) -> const titles::Group * {
+        for (const titles::Group &group : groups) {
+            if (group.id == id) {
+                return &group;
+            }
+        }
+        return nullptr;
+    };
+    // HOME Menu is never shown, so never grouped.
+    CHECK(find(HomeMenu) == nullptr);
+    const titles::Group *game = find(Game);
+    CHECK(game != nullptr);
+    CHECK(game->installed());
+    CHECK(game->update != nullptr && game->dlc != nullptr);
+    CHECK_EQ(game->size(), static_cast<uint64_t>(123));
+    CHECK_EQ(game->tickets.size(), static_cast<size_t>(3));
+    CHECK(game->hasTicket(GameDlc));
+    CHECK(game->hasExtData);
+    CHECK(!game->unused);
+
+    const titles::Group *gone = find(Gone);
+    CHECK(gone != nullptr && !gone->installed());
+    CHECK(gone->hasExtData);
+    CHECK(gone->unused);
+
+    // An update alone is never called unused: its game may be on a card.
+    const titles::Group *card = find(0x0004000000088800ULL);
+    CHECK(card != nullptr && card->update != nullptr && !card->unused);
+
+    // DSiWare's tickets are never unused by the rules, alone or not.
+    const titles::Group *dsiTicket = find(0x00048004AAAAAAAAULL);
+    CHECK(dsiTicket != nullptr && !dsiTicket->unused);
+    CHECK(find(DsiWare) != nullptr && find(DsiWare)->installed());
+
+    // An unfinished install keeps its group from being unused.
+    const titles::Group *demo = find(0x0004000200999900ULL);
+    CHECK(demo != nullptr && demo->pending.size() == 1 && !demo->unused);
+
+    // Extra data of nothing stands alone, unused when the rules say so.
+    const titles::Group *alone = find(0);
+    CHECK(alone != nullptr && alone->hasExtData && alone->extData == 0x00ABC);
+    CHECK(alone->unused);
+    const std::vector<titles::Group> unsure = titles::groupTitles(
+        {}, {}, {}, {0x00ABC}, {}, {});
+    CHECK(unsure.size() == 1 && !unsure[0].unused);
+}
+
+TEST("titles: the list puts installed software first in either order")
+{
+    std::vector<titles::Title> installed = {title(Game, "B"), title(Demo, "a"),
+                                            title(DsiWare, "C")};
+    installed[0].size = 10;
+    installed[1].size = 5;
+    installed[2].size = 30;
+    std::vector<titles::Group> groups = titles::groupTitles(
+        installed, {0x0004000000077700ULL, 0x0004000000066600ULL}, {}, {}, {}, {});
+    for (titles::Group &group : groups) {
+        group.name = group.software != nullptr ? group.software->name
+                     : group.id == 0x0004000000077700ULL ? "Z gone"
+                                                          : "A gone";
+    }
+    const auto names = [&]() {
+        std::string out;
+        for (const titles::Group &group : groups) {
+            out += group.name + ",";
+        }
+        return out;
+    };
+    titles::sortGroups(groups, fs::SortOrder::Name, false);
+    CHECK_EQ(names(), std::string("a,B,C,A gone,Z gone,"));
+    titles::sortGroups(groups, fs::SortOrder::Name, true);
+    CHECK_EQ(names(), std::string("C,B,a,Z gone,A gone,"));
+    titles::sortGroups(groups, fs::SortOrder::Size, false);
+    CHECK_EQ(names(), std::string("C,B,a,A gone,Z gone,"));
+    titles::sortGroups(groups, fs::SortOrder::Size, true);
+    CHECK_EQ(names(), std::string("a,B,C,Z gone,A gone,"));
+}

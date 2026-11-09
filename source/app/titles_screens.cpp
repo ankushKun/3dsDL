@@ -17,9 +17,9 @@
 #include <map>
 #include <set>
 
-// Titles: installed software, updates and DLC, extra data, tickets, seeds
-// and cleaning up after failed installs, in the spirit of System Settings,
-// Data Management.
+// Titles: one list of installed software, each with its update, DLC, save
+// data, extra data and tickets, and what is left of software that is gone;
+// a page for each, and the jobs for all of them under Options.
 
 namespace {
 
@@ -60,41 +60,6 @@ ui::Icon iconFor(uint64_t titleId)
     }
 }
 
-// The title's icon, name and publisher over its Title ID, version and size;
-// order is how the list it is in is sorted, if it is in one.
-void drawTitleTop(const std::string &header, ui::Icon headerIcon,
-                  const titles::Title &title, const titles::Index &index,
-                  const std::string &order = "")
-{
-    ui::drawTopChrome(header, headerIcon, ui::color::IconBlue, order);
-    ui::drawPanel();
-    const float left = ui::TopPanel.x + 18;
-    const float top = ui::TopPanel.y + 12;
-    const titles::Title *game = &title;
-    if (title.icon.empty()) {
-        const auto found = index.find(cia::baseTitle(title.id));
-        if (found != index.end()) {
-            game = found->second;
-        }
-    }
-    ui::drawTitleIcon(game->icon, left, top, iconFor(title.id));
-    ui::drawMarquee(titles::displayName(title, index), left + 60, top + 2,
-                    0.62f, ui::color::InkStrong, 280);
-    std::string second = game->publisher.empty()
-                             ? cia::kindName(cia::kind(title.id))
-                             : game->publisher;
-    if (!title.productCode.empty()) {
-        second += "   " + title.productCode;
-    }
-    ui::drawMarquee(second, left + 60, top + 30, ui::type::Small,
-                    ui::color::InkSoft, 280);
-    float y = top + 60;
-    y = ui::drawTagRow(left, y, 76, "Title ID", cia::titleIdText(title.id));
-    y = ui::drawTagRow(left, y, 76, "Version", screens::titleVersion(title.id, title.version));
-    ui::drawTagRow(left, y, 76, "Size",
-                   units::bytes(title.size) + ", " + placeName(title.place));
-}
-
 // No body or icon, so the top screen keeps showing what is being deleted.
 bool confirmDanger(const std::string &header, const std::string &title,
                    const std::string &button)
@@ -108,17 +73,6 @@ bool confirmDanger(const std::string &header, const std::string &title,
     dialog.initial = 1;
     dialog.cancelButton = 1;
     return ui::choose(dialog) == 0;
-}
-
-const library::ExtData *extDataFor(const titles::Title &title,
-                                   const library::Snapshot &snapshot)
-{
-    for (const library::ExtData &extData : snapshot.extData) {
-        if (extData.id == titles::uniqueId(title.id)) {
-            return &extData;
-        }
-    }
-    return nullptr;
 }
 
 } // namespace
@@ -147,628 +101,7 @@ void App::pollLibrary()
 bool App::reloadLibrary()
 {
     startLibrary();
-    std::string error;
-    while (ui::keepRunning() && !library_.complete &&
-           !libraryLoader_.failed(error)) {
-        ui::readInput();
-        ui::BusyView view;
-        view.header = "Titles";
-        view.title = "Reading the installed software...";
-        const uint64_t total = libraryLoader_.total();
-        if (total > 0) {
-            view.progress = true;
-            view.fraction = static_cast<float>(libraryLoader_.done()) / total;
-            view.amount = std::to_string(libraryLoader_.done()) + " of " +
-                          std::to_string(total);
-        }
-        ui::drawBusy(view); // its frame hook takes what arrived
-        gspWaitForVBlank();
-    }
-    if (!library_.complete && libraryLoader_.failed(error)) {
-        ui::message("Titles Unavailable", error, ui::Tone::Error);
-    }
-    return library_.complete;
-}
-
-void App::titlesScreen()
-{
-    // Opens at once while the titles are read in the background; the title
-    // lists and Save Data fill in as they arrive. Everything that needs the
-    // whole picture (tickets, seeds, extra data, clean up) waits for it.
-    startLibrary();
-    struct StopReading {
-        library::Loader &loader;
-        ~StopReading() { loader.stop(); }
-    } stopReading {libraryLoader_};
-
-    int focus = 3;
-    while (ui::keepRunning() && !quit_) {
-        size_t software = 0;
-        size_t addOns = 0;
-        uint64_t sdBytes = 0;
-        size_t unused = 0;
-        size_t cleanUp = 0;
-        std::string error;
-        bool failed = false;
-        const auto count = [&]() {
-            software = addOns = 0;
-            sdBytes = 0;
-            for (const titles::Title &title : library_.titles) {
-                (titles::isSoftware(title.id) ? software : addOns) += 1;
-                if (title.place == titles::Place::SdCard) {
-                    sdBytes += title.size;
-                }
-            }
-            unused = library::unusedTickets(library_).size();
-            cleanUp = unused + library_.pending.size();
-            failed = libraryLoader_.failed(error);
-        };
-        count();
-
-        ui::ScreenSpec spec;
-        spec.back = "Back";
-        const auto add = [&](ui::Rect rect, const char *label, ui::Icon icon,
-                             u32 iconColor, bool tile) {
-            ui::Control control;
-            control.rect = rect;
-            control.label = label;
-            control.icon = icon;
-            control.iconColor = iconColor;
-            control.tile = tile;
-            control.scale = ui::type::Small + 0.06f;
-            spec.controls.push_back(control);
-        };
-        // Three narrow bars: words only, so they fit without scrolling.
-        add({16, 6, 92, 26}, "Clean Up", ui::Icon::None, 0, false);
-        spec.controls.back().scale = ui::type::Small;
-        add({114, 6, 92, 26}, "Tickets", ui::Icon::None, 0, false);
-        spec.controls.back().scale = ui::type::Small;
-        add({212, 6, 92, 26}, "Seeds", ui::Icon::None, 0, false);
-        spec.controls.back().scale = ui::type::Small;
-        add({16, 42, 140, 78}, "Software", ui::Icon::GameCard,
-            ui::color::IconBlue, true);
-        add({164, 42, 140, 78}, "Updates and DLC", ui::Icon::Download,
-            ui::color::IconGreen, true);
-        add({16, 127, 140, 76}, "Save Data", ui::Icon::Chip,
-            ui::color::IconTeal, true);
-        add({164, 127, 140, 76}, "Extra Data", ui::Icon::Folder,
-            ui::color::IconOrange, true);
-        // The title lists and Save Data fill in while the titles are read;
-        // the rest needs all of them first.
-        uint32_t seen = libraryGeneration_ - 1;
-        spec.update = [&]() {
-            if (seen == libraryGeneration_) {
-                return false;
-            }
-            seen = libraryGeneration_;
-            count();
-            for (const int needsAll : {0, 1, 2, 6}) {
-                spec.controls[needsAll].enabled = library_.complete;
-            }
-            spec.controls[0].badge =
-                library_.complete && cleanUp > 0 ? std::to_string(cleanUp) : "";
-            return true;
-        };
-        spec.update();
-        spec.drawTop = [&]() {
-            ui::drawTopChrome("Titles", ui::Icon::GameCard, ui::color::IconBlue);
-            ui::drawPanel();
-            std::vector<ui::Fact> facts;
-            if (failed) {
-                facts.push_back({"Not read", error, ui::color::Bad});
-            } else if (!library_.complete) {
-                facts.push_back({"Reading",
-                                 std::to_string(libraryLoader_.done()) + " of " +
-                                     std::to_string(libraryLoader_.total()),
-                                 ui::color::Badge});
-            }
-            switch (focus) {
-            case 0:
-                facts.push_back({"Unfinished",
-                                 plural(library_.pending.size(), "install")});
-                facts.push_back({"Unused", plural(unused, "ticket")});
-                break;
-            case 1:
-                facts.push_back(
-                    {"Tickets", std::to_string(library_.tickets.size())});
-                facts.push_back({"Unused", std::to_string(unused)});
-                break;
-            case 2:
-                facts.push_back({"Looks in", "sdmc:/seeddb.bin"});
-                break;
-            case 4:
-                facts.push_back({"Installed", plural(addOns, "item")});
-                break;
-            case 5:
-                facts.push_back({"Backups in", "sdmc:/3ds/Checkpoint/saves/"});
-                break;
-            case 6:
-                facts.push_back({"On SD card",
-                                 plural(library_.extData.size(), "item")});
-                facts.push_back(
-                    {"Backups in", "sdmc:/3ds/Checkpoint/extdata/"});
-                break;
-            default:
-                facts.push_back({"Installed", plural(software, "title")});
-                facts.push_back(
-                    {"On SD card",
-                     !library_.complete || library_.sdListed
-                         ? units::bytes(sdBytes)
-                         : "Not readable",
-                     !library_.complete || library_.sdListed
-                         ? ui::color::Tag
-                         : ui::color::Badge});
-                break;
-            }
-            ui::drawFacts(facts);
-        };
-        const ui::ScreenResult result = ui::runScreen(spec, focus);
-        switch (result.choice) {
-        case 0:
-            cleanUpScreen();
-            break;
-        case 1:
-            ticketsScreen();
-            break;
-        case 2:
-            importSeeds();
-            break;
-        case 3:
-            titleList(true);
-            break;
-        case 4:
-            titleList(false);
-            break;
-        case 5:
-            saveTitlesScreen();
-            break;
-        case 6:
-            extraDataScreen();
-            break;
-        default:
-            return;
-        }
-    }
-}
-
-namespace {
-
-struct ShowChoice {
-    titles::Show show;
-    const char *label; // on the sort screen
-    const char *title; // the list's, while it shows only these
-    const char *empty;
-};
-
-const ShowChoice SoftwareShows[] = {
-    {titles::Show::All, "All Software", "Software", "No software installed."},
-    {titles::Show::SdCard, "SD Card", "Software on SD Card",
-     "No software on the SD card."},
-    {titles::Show::SystemMemory, "System Memory", "Software in System Memory",
-     "No software in system memory."},
-};
-const ShowChoice AddOnShows[] = {
-    {titles::Show::All, "Updates and DLC", "Updates and DLC",
-     "No updates or DLC installed."},
-    {titles::Show::Updates, "Updates", "Updates", "No updates installed."},
-    {titles::Show::Dlc, "DLC", "DLC", "No DLC installed."},
-};
-
-const ShowChoice &showChoice(bool software, titles::Show show)
-{
-    const ShowChoice *choices = software ? SoftwareShows : AddOnShows;
-    for (int index = 0; index < 3; ++index) {
-        if (choices[index].show == show) {
-            return choices[index];
-        }
-    }
-    return choices[0];
-}
-
-} // namespace
-
-void App::titleList(bool software)
-{
-    int cursor = 0;
-    uint64_t follow = 0; // a title to land on after the order changes
-    while (ui::keepRunning() && !quit_) {
-        // Rebuilt whenever more titles arrive, so the list fills in while
-        // it is open; rows are keyed by Title ID, so the highlight stays.
-        titles::Index index;
-        std::vector<const titles::Title *> shown;
-        const titles::Show show = software ? softwareShow_ : addOnShow_;
-        ui::ListSpec spec;
-        spec.title = showChoice(software, show).title;
-        spec.emptyText = showChoice(software, show).empty;
-        spec.action = "Sort";
-        spec.actionKey = "X";
-        spec.actionKeys = KEY_X;
-        uint32_t seen = libraryGeneration_ - 1;
-        spec.update = [&]() {
-            if (seen == libraryGeneration_) {
-                return false;
-            }
-            seen = libraryGeneration_;
-            index = titles::indexOf(library_.titles);
-            shown.clear();
-            for (const titles::Title &title : library_.titles) {
-                if (titles::isSoftware(title.id) == software &&
-                    titles::shows(show, title)) {
-                    shown.push_back(&title);
-                }
-            }
-            titles::sortTitles(shown, index, settings_.titleSort,
-                               settings_.titleSortReverse);
-            spec.items.clear();
-            for (const titles::Title *title : shown) {
-                ui::ListItem item;
-                item.key = cia::titleIdText(title->id);
-                item.label = titles::displayName(*title, index);
-                item.icon = iconFor(title->id);
-                item.iconColor =
-                    software ? ui::color::IconBlue : ui::color::IconGreen;
-                const cia::Kind kind = cia::kind(title->id);
-                if (kind == cia::Kind::Update || kind == cia::Kind::Dlc) {
-                    item.badge = kind == cia::Kind::Update ? "Update" : "DLC";
-                    item.badgeColor = kind == cia::Kind::Update
-                                          ? ui::color::Tag
-                                          : ui::color::Good;
-                } else {
-                    item.detail = units::bytes(title->size);
-                }
-                spec.items.push_back(item);
-            }
-            return true;
-        };
-        spec.update();
-        for (size_t row = 0; follow != 0 && row < shown.size(); ++row) {
-            if (shown[row]->id == follow) {
-                cursor = static_cast<int>(row);
-            }
-        }
-        follow = 0;
-        spec.loading = [&]() {
-            std::string ignored;
-            return !library_.complete && !libraryLoader_.failed(ignored);
-        };
-        spec.drawTop = [&](int highlighted) {
-            const std::string order = screens::sortDescription(
-                settings_.titleSort, settings_.titleSortReverse);
-            if (highlighted < 0 || highlighted >= static_cast<int>(shown.size())) {
-                ui::drawTopChrome(spec.title, ui::Icon::GameCard,
-                                  ui::color::IconBlue, order);
-                ui::drawPanel();
-                ui::drawEmblem(ui::Icon::GameCard, ui::color::IconBlue);
-                return;
-            }
-            drawTitleTop(spec.title, software ? ui::Icon::GameCard
-                                              : ui::Icon::Download,
-                         *shown[highlighted], index, order);
-        };
-        const ui::ListResult result = ui::runList(spec, cursor);
-        const bool onRow =
-            result.index >= 0 && result.index < static_cast<int>(shown.size());
-        if (result.key == KEY_X) {
-            follow = onRow ? shown[result.index]->id : 0;
-            cursor = 0;
-            titleSortScreen(software);
-            continue;
-        }
-        if (result.key != KEY_A || !onRow) {
-            return;
-        }
-        titleOptions(*shown[result.index]);
-    }
-}
-
-void App::titleSortScreen(bool software)
-{
-    titles::Show &show = software ? softwareShow_ : addOnShow_;
-    const ShowChoice *shows = software ? SoftwareShows : AddOnShows;
-    int focus = settings_.titleSort == fs::SortOrder::Size ? 1 : 0;
-    // Picks apply at once and the screen stays, like the files' Sort.
-    while (ui::keepRunning() && !quit_) {
-        ui::ScreenSpec spec;
-        spec.back = "Back";
-        const fs::SortOrder orders[] = {fs::SortOrder::Name, fs::SortOrder::Size};
-        for (int index = 0; index < 2; ++index) {
-            ui::Control control;
-            control.rect = {index == 0 ? 26.0f : 164.0f, 29, 130, 40};
-            control.label = index == 0 ? "Name" : "Size";
-            control.style = settings_.titleSort == orders[index]
-                                ? ui::Style::Chosen
-                                : ui::Style::Normal;
-            spec.controls.push_back(control);
-        }
-        ui::Control reverse;
-        reverse.rect = {26, 81, 268, 40};
-        reverse.label = "Reverse Order";
-        reverse.style = settings_.titleSortReverse ? ui::Style::Chosen
-                                                   : ui::Style::Normal;
-        spec.controls.push_back(reverse);
-        for (int index = 0; index < 3; ++index) {
-            ui::Control control;
-            control.rect = {26.0f + index * 92.0f, 139, 84, 40};
-            control.label = shows[index].label;
-            control.style =
-                shows[index].show == show ? ui::Style::Chosen : ui::Style::Normal;
-            spec.controls.push_back(control);
-        }
-        spec.drawTop = [&]() {
-            ui::drawTopChrome("Sort", software ? ui::Icon::GameCard
-                                               : ui::Icon::Download,
-                              software ? ui::color::IconBlue : ui::color::IconGreen);
-            ui::drawPanel();
-            ui::drawFacts(
-                {{"Order", screens::sortDescription(settings_.titleSort,
-                                           settings_.titleSortReverse)},
-                 {"Showing", showChoice(software, show).label}});
-        };
-        const ui::ScreenResult result = ui::runScreen(spec, focus);
-        if (result.choice == 0 || result.choice == 1) {
-            settings_.titleSort = orders[result.choice];
-            persistSettings();
-        } else if (result.choice == 2) {
-            settings_.titleSortReverse = !settings_.titleSortReverse;
-            persistSettings();
-        } else if (result.choice >= 3 && result.choice < 6) {
-            show = shows[result.choice - 3].show;
-        } else {
-            return;
-        }
-    }
-}
-
-void App::titleOptions(titles::Title title)
-{
-    const titles::Index index = titles::indexOf(library_.titles);
-    const std::string name = titles::displayName(title, index);
-    const cia::Kind kind = cia::kind(title.id);
-    const bool launchable = kind == cia::Kind::Application ||
-                            kind == cia::Kind::Demo ||
-                            kind == cia::Kind::DsiWare;
-    const library::ExtData *extData = extDataFor(title, library_);
-    const bool self = title.id == library::runningTitle();
-
-    enum Choice { Launch, Saves, Extra, Seed, ExtraData, Delete, DeleteWithTicket };
-    std::vector<Choice> choices;
-    std::vector<ui::MenuItem> items;
-    const auto offer = [&](Choice choice, const std::string &label,
-                           bool danger = false, bool enabled = true) {
-        choices.push_back(choice);
-        items.push_back({label, danger, enabled});
-    };
-    if (launchable) {
-        offer(Launch, "Launch", false, !self);
-    }
-    const savedata::Target saveTarget =
-        savedata::saveOf(title, library::mediaOf(title));
-    const bool canSave = titles::isSoftware(title.id) &&
-                         savedata::unsupportedReason(title).empty() &&
-                         savedata::exists(saveTarget);
-    if (canSave) {
-        offer(Saves, "Save Data");
-    }
-    if (extData != nullptr) {
-        offer(Extra, "Extra Data");
-    }
-    if (kind == cia::Kind::Application) {
-        offer(Seed, "Get Seed");
-    }
-    if (extData != nullptr) {
-        offer(ExtraData, "Delete Extra Data", true);
-    }
-    const bool removable = !self && title.place != titles::Place::GameCard;
-    offer(Delete, "Delete", true, removable);
-    offer(DeleteWithTicket, "Delete with Ticket", true, removable);
-
-    const int picked = ui::menu(items, [&](int) {
-        drawTitleTop(name, iconFor(title.id), title, index);
-    });
-    if (picked < 0) {
-        return;
-    }
-
-    std::string error;
-    switch (choices[picked]) {
-    case Launch:
-        if (!installer::launch(title.id, error)) {
-            ui::message("Could Not Launch", error, ui::Tone::Error);
-        }
-        return;
-    case Saves:
-        saveDataScreen(saveTarget, title.icon);
-        return;
-    case Extra:
-        saveDataScreen(savedata::extDataOf(title), title.icon);
-        return;
-    case Seed: {
-        std::string message;
-        bool added = false;
-        if (!tasks::busy("Seeds", "Getting the seed " + name + " needs...",
-                         [&](tasks::Busy &busy) {
-                             added = installer::installSeed(title.id, message,
-                                                            &busy.cancel);
-                         },
-                         true)) {
-            return;
-        }
-        ui::message(added ? "Seed Added" : "No Seed Added", message,
-                    added ? ui::Tone::Success : ui::Tone::Warning);
-        return;
-    }
-    case ExtraData:
-        if (confirmDanger("Delete", "Delete the extra data of " + name + "?",
-                          "Delete")) {
-            // The reader stops first, so nothing is read while it changes;
-            // the list it came from fills in again by itself.
-            libraryLoader_.stop();
-            if (!library::deleteExtData(extData->id, error)) {
-                ui::message("Not Deleted", error, ui::Tone::Error);
-            }
-            startLibrary();
-        }
-        return;
-    case Delete:
-    case DeleteWithTicket: {
-        const bool withTicket = choices[picked] == DeleteWithTicket;
-        // An update or DLC goes by its game's name, so the question says
-        // which; a game takes its save with it.
-        std::string question;
-        if (kind == cia::Kind::Update || kind == cia::Kind::Dlc) {
-            question = std::string("Delete the ") +
-                       (kind == cia::Kind::Update ? "update" : "DLC") +
-                       " for " + name + (withTicket ? " and its ticket?" : "?");
-        } else {
-            question = "Delete " + name +
-                       (withTicket ? ", its save data and its ticket?"
-                                   : " and its save data?");
-        }
-        if (!confirmDanger("Delete", question, "Delete")) {
-            return;
-        }
-        bool deleted = false;
-        libraryLoader_.stop();
-        tasks::busy("Delete", "Deleting " + name + "...", [&]() {
-            deleted = library::deleteTitle(title, withTicket, error);
-        });
-        if (!deleted) {
-            ui::message("Not Deleted", error, ui::Tone::Error);
-        }
-        if (deleted && library_.complete) {
-            library::forgetTitle(library_, title, withTicket);
-            ++libraryGeneration_;
-        } else {
-            startLibrary();
-        }
-        return;
-    }
-    }
-}
-
-void App::extraDataScreen()
-{
-    int cursor = 0;
-    while (ui::keepRunning() && !quit_) {
-        const titles::Index index = titles::indexOf(library_.titles);
-        const auto nameOf = [&](const library::ExtData &extData) {
-            if (!extData.name.empty()) {
-                return extData.name;
-            }
-            const titles::Title *owner =
-                titles::ownerOfExtData(extData.id, library_.titles);
-            if (owner != nullptr) {
-                return titles::displayName(*owner, index);
-            }
-            char text[24];
-            std::snprintf(text, sizeof(text), "Extra data %08llX",
-                          static_cast<unsigned long long>(extData.id));
-            return std::string(text);
-        };
-        std::vector<const library::ExtData *> shown;
-        for (const library::ExtData &extData : library_.extData) {
-            shown.push_back(&extData);
-        }
-        std::stable_sort(shown.begin(), shown.end(),
-                         [&](const library::ExtData *a, const library::ExtData *b) {
-                             return text::lower(nameOf(*a)) < text::lower(nameOf(*b));
-                         });
-
-        ui::ListSpec spec;
-        spec.title = "Extra Data";
-        spec.emptyText = "No extra data.";
-        for (const library::ExtData *extData : shown) {
-            ui::ListItem item;
-            item.label = nameOf(*extData);
-            item.icon = ui::Icon::Folder;
-            item.iconColor = ui::color::IconOrange;
-            if (!library::extDataInUse(library_, extData->id)) {
-                item.badge = "Unused";
-                item.badgeColor = ui::color::Neutral;
-            }
-            spec.items.push_back(item);
-        }
-        // The list and the menu for one item show the same facts.
-        const auto drawDetails = [&](const library::ExtData &extData) {
-            ui::drawTopChrome("Extra Data", ui::Icon::Folder,
-                              ui::color::IconOrange);
-            ui::drawPanel();
-            const titles::Title *owner =
-                titles::ownerOfExtData(extData.id, library_.titles);
-            const float left = ui::TopPanel.x + 18;
-            const float top = ui::TopPanel.y + 12;
-            ui::drawTitleIcon(!extData.icon.empty() || owner == nullptr
-                                  ? extData.icon
-                                  : owner->icon,
-                              left, top, ui::Icon::Folder);
-            ui::drawMarquee(nameOf(extData), left + 60, top + 2, 0.62f,
-                            ui::color::InkStrong, 280);
-            ui::drawMarquee(extData.publisher, left + 60, top + 30,
-                            ui::type::Small, ui::color::InkSoft, 280);
-            char id[16];
-            std::snprintf(id, sizeof(id), "%08llX",
-                          static_cast<unsigned long long>(extData.id));
-            const float y = ui::drawTagRow(left, top + 60, 96, "ID", id);
-            const bool inUse = library::extDataInUse(library_, extData.id);
-            ui::drawTagRow(left, y, 96, "Software",
-                           inUse ? "Installed" : "Not installed",
-                           inUse ? ui::color::Tag : ui::color::Neutral);
-        };
-        spec.drawTop = [&](int highlighted) {
-            if (highlighted < 0 || highlighted >= static_cast<int>(shown.size())) {
-                ui::drawTopChrome("Extra Data", ui::Icon::Folder,
-                                  ui::color::IconOrange);
-                ui::drawPanel();
-                ui::drawEmblem(ui::Icon::Folder, ui::color::IconOrange);
-                return;
-            }
-            drawDetails(*shown[highlighted]);
-        };
-        if (!shown.empty()) {
-            spec.action = "Delete";
-            spec.actionKey = "X";
-            spec.actionKeys = KEY_X;
-        }
-        const ui::ListResult result = ui::runList(spec, cursor);
-        if ((result.key != KEY_A && result.key != KEY_X) || result.index < 0 ||
-            result.index >= static_cast<int>(shown.size())) {
-            return;
-        }
-        const library::ExtData extData = *shown[result.index];
-        const std::string name = nameOf(extData);
-        if (result.key == KEY_A) {
-            const int choice = ui::menu(
-                {{"Back Up and Restore", false, true}, {"Delete", true, true}},
-                [&](int) { drawDetails(extData); });
-            if (choice == 0) {
-                // Named after the game when it is installed, as Checkpoint
-                // names it; otherwise after the extra data's own icon.
-                const titles::Title *owner =
-                    titles::ownerOfExtData(extData.id, library_.titles);
-                saveDataScreen(owner != nullptr
-                                   ? savedata::extDataOf(*owner)
-                                   : savedata::extDataOf(extData.id,
-                                                         extData.englishShortName,
-                                                         name),
-                               extData.icon.empty() && owner != nullptr
-                                   ? owner->icon
-                                   : extData.icon);
-                continue;
-            }
-            if (choice != 1) {
-                continue;
-            }
-        }
-        if (!confirmDanger("Delete", "Delete the extra data of " + name + "?",
-                           "Delete")) {
-            continue;
-        }
-        std::string error;
-        if (!library::deleteExtData(extData.id, error)) {
-            ui::message("Not Deleted", error, ui::Tone::Error);
-        }
-        reloadLibrary();
-    }
+    return waitForLibrary();
 }
 
 namespace {
@@ -960,149 +293,6 @@ bool App::confirmUnsavedTickets(const std::vector<uint64_t> &tickets,
     return true;
 }
 
-void App::ticketsScreen()
-{
-    int cursor = 0;
-    const std::vector<std::string> folders = checkpointFolders();
-    while (ui::keepRunning() && !quit_) {
-        const titles::Index index = titles::indexOf(library_.titles);
-        // The name of software that is gone, when 3dsDL can tell.
-        const auto nameFor = [&](uint64_t ticket) {
-            const std::string name = softwareName(ticket, index, folders);
-            return name.empty() ? cia::titleIdText(ticket) : name;
-        };
-        const std::vector<uint64_t> unusedList =
-            library::unusedTickets(library_);
-        const std::set<uint64_t> unused(unusedList.begin(), unusedList.end());
-        std::vector<uint64_t> shown = library_.tickets;
-        std::stable_sort(shown.begin(), shown.end(), [&](uint64_t a, uint64_t b) {
-            const std::string left = text::lower(nameFor(a));
-            const std::string right = text::lower(nameFor(b));
-            return left != right ? left < right : a < b;
-        });
-
-        ui::ListSpec spec;
-        spec.title = "Tickets";
-        spec.emptyText = "No tickets.";
-        for (const uint64_t ticket : shown) {
-            ui::ListItem item;
-            item.label = nameFor(ticket);
-            item.icon = ui::Icon::Lock;
-            item.iconColor = ui::color::IconGrey;
-            if (unused.count(ticket) != 0) {
-                item.badge = "Unused";
-                item.badgeColor = ui::color::Neutral;
-            } else {
-                item.detail = cia::kindName(cia::kind(ticket));
-            }
-            spec.items.push_back(item);
-        }
-        // The list and the menu for one ticket show the same facts.
-        const auto drawDetails = [&](uint64_t ticket) {
-            ui::drawTopChrome("Tickets", ui::Icon::Lock, ui::color::IconGrey);
-            ui::drawPanel();
-            const auto own = index.find(ticket);
-            const auto game = index.find(cia::baseTitle(ticket));
-            const std::vector<uint16_t> noIcon;
-            const std::vector<uint16_t> &icon =
-                own != index.end() && !own->second->icon.empty() ? own->second->icon
-                : game != index.end() ? game->second->icon
-                                      : noIcon;
-            const float left = ui::TopPanel.x + 18;
-            const float top = ui::TopPanel.y + 12;
-            ui::drawTitleIcon(icon, left, top, ui::Icon::Lock);
-            // The name alone, level with the icon's middle; the list says
-            // the kind.
-            ui::drawMarquee(nameFor(ticket), left + 60,
-                            top + (48 - ui::lineHeight(0.62f)) / 2, 0.62f,
-                            ui::color::InkStrong, 280);
-            const float y = ui::drawTagRow(left, top + 60, 96, "Title ID",
-                                           cia::titleIdText(ticket));
-            const bool isUnused = unused.count(ticket) != 0;
-            // Without the SD card's list, whether it is installed is unknown.
-            ui::drawTagRow(left, y, 96, "Software",
-                           !library_.sdListed ? "Unknown"
-                           : isUnused         ? "Not installed"
-                                              : "Installed",
-                           isUnused ? ui::color::Neutral : ui::color::Tag);
-        };
-        spec.drawTop = [&](int highlighted) {
-            if (highlighted < 0 || highlighted >= static_cast<int>(shown.size())) {
-                ui::drawTopChrome("Tickets", ui::Icon::Lock, ui::color::IconGrey);
-                ui::drawPanel();
-                ui::drawEmblem(ui::Icon::Lock, ui::color::IconGrey);
-                return;
-            }
-            drawDetails(shown[highlighted]);
-        };
-        if (!unusedList.empty()) {
-            spec.action = "Delete Unused";
-            spec.actionKey = "X";
-            spec.actionKeys = KEY_X;
-        }
-        const ui::ListResult result = ui::runList(spec, cursor);
-        if (result.key == KEY_X && !unusedList.empty()) {
-            deleteUnusedTickets();
-            continue;
-        }
-        if (result.key != KEY_A || result.index < 0 ||
-            result.index >= static_cast<int>(shown.size())) {
-            return;
-        }
-        const uint64_t ticket = shown[result.index];
-        const std::string name = nameFor(ticket);
-        const int choice = ui::menu(
-            {{"Export to SD Card", false, true}, {"Delete", true, true}},
-            [&](int) { drawDetails(ticket); });
-        if (choice == 0) {
-            std::string path;
-            std::string error;
-            bool exported = false;
-            tasks::busy("Tickets", "Exporting the ticket...", [&]() {
-                exported = library::exportTicket(
-                    ticket, "sdmc:/3ds/3dsDL/tickets/", path, error);
-            });
-            if (exported) {
-                ui::message("Ticket Exported", "Saved as " + path + ".",
-                            ui::Tone::Success);
-            } else {
-                ui::message("Not Exported", error, ui::Tone::Error);
-            }
-            continue;
-        }
-        if (choice != 1) {
-            continue;
-        }
-        // Installed software does not start without its ticket. Asked
-        // fresh, so a misread list never words it as harmless.
-        const bool needed = library::installedAnywhere(ticket) ||
-                            library_.onSdCard.count(ticket) != 0 ||
-                            unused.count(ticket) == 0;
-        if (!confirmDanger("Delete",
-                           needed ? "Delete the ticket " + name +
-                                        " needs to start?"
-                                  : "Delete the ticket for " + name + "?",
-                           "Delete")) {
-            continue;
-        }
-        std::string error;
-        bool unsaved = false;
-        if (!library::deleteTicket(ticket, error, &unsaved)) {
-            // One the console will not export can still go, once the
-            // person has seen what it is.
-            std::map<uint64_t, library::TicketFacts> shown;
-            if (!unsaved) {
-                ui::message("Not Deleted", error, ui::Tone::Error);
-            } else if (confirmUnsavedTickets({ticket}, error, shown) &&
-                       !library::deleteTicket(ticket, error, nullptr,
-                                              &shown[ticket])) {
-                ui::message("Not Deleted", error, ui::Tone::Error);
-            }
-        }
-        reloadLibrary();
-    }
-}
-
 void App::deleteUnusedTickets()
 {
     // Decided again from scratch, never from what the screens showed: a
@@ -1183,91 +373,6 @@ void App::deleteUnusedTickets()
     reloadLibrary();
 }
 
-void App::cleanUpScreen()
-{
-    int focus = 0;
-    while (ui::keepRunning() && !quit_) {
-        const size_t pending = library_.pending.size();
-        const size_t unused =
-            library::unusedTickets(library_).size();
-        const size_t saved = library::deletedTicketCount();
-        ui::ScreenSpec spec;
-        spec.back = "Back";
-        const auto add = [&](ui::Rect rect, const std::string &label,
-                             bool enabled) {
-            ui::Control control;
-            control.rect = rect;
-            control.label = label;
-            control.icon = ui::Icon::Trash;
-            control.iconColor = ui::color::IconRed;
-            control.enabled = enabled;
-            control.scale = ui::type::Small + 0.06f;
-            spec.controls.push_back(control);
-        };
-        // Centred between the top and the tabs.
-        add({22, 26, 276, 44}, "Remove Unfinished Installs", pending > 0);
-        add({22, 82, 276, 44}, "Delete Unused Tickets", unused > 0);
-        add({22, 138, 276, 44}, "Restore Deleted Tickets", saved > 0);
-        spec.controls.back().icon = ui::Icon::History;
-        spec.controls.back().iconColor = ui::color::IconGreen;
-        spec.drawTop = [&]() {
-            ui::drawTopChrome("Clean Up", ui::Icon::Trash, ui::color::IconRed);
-            ui::drawPanel();
-            ui::drawFacts({{"Unfinished", plural(pending, "install"),
-                            pending > 0 ? ui::color::Badge : ui::color::Tag},
-                           {"Unused", plural(unused, "ticket")},
-                           {"Saved", plural(saved, "deleted ticket")}});
-        };
-        const ui::ScreenResult result = ui::runScreen(spec, focus);
-        if (result.choice == 0) {
-            if (!confirmDanger("Clean Up",
-                               "Remove " + plural(pending, "unfinished install") +
-                                   "?",
-                               "Remove")) {
-                continue;
-            }
-            size_t removed = 0;
-            std::string error;
-            tasks::busy(
-                "Clean Up", "Removing unfinished installs...",
-                [&](tasks::Busy &busy) {
-                    busy.total = library_.pending.size();
-                    for (const library::PendingTitle &title : library_.pending) {
-                        if (library::deletePending(title, error)) {
-                            ++removed;
-                        }
-                        busy.done.fetch_add(1);
-                    }
-                },
-                false);
-            ui::message(removed == pending ? "Cleaned Up" : "Some Remain",
-                        plural(removed, "unfinished install") + " removed.",
-                        removed == pending ? ui::Tone::Success
-                                           : ui::Tone::Warning,
-                        error);
-            reloadLibrary();
-        } else if (result.choice == 1) {
-            deleteUnusedTickets();
-        } else if (result.choice == 2) {
-            std::string error;
-            size_t restored = 0;
-            tasks::busy("Tickets", "Restoring deleted tickets...", [&]() {
-                restored = library::restoreDeletedTickets(error);
-            });
-            ui::message(restored == saved ? "Tickets Restored"
-                                          : "Some Tickets Not Restored",
-                        plural(restored, "ticket") + " of " +
-                            std::to_string(saved) + " restored.",
-                        restored == saved ? ui::Tone::Success
-                                          : ui::Tone::Warning,
-                        error);
-            reloadLibrary();
-        } else {
-            return;
-        }
-    }
-}
-
 void App::importSeeds()
 {
     std::string path;
@@ -1328,4 +433,808 @@ void App::importSeeds()
                 plural(added, "seed") + " added.",
                 added == wanted.size() ? ui::Tone::Success : ui::Tone::Warning,
                 error);
+}
+
+// --- The Titles list -------------------------------------------------------------
+
+namespace {
+
+// Names a row the same way while the list fills in and after it changes.
+std::string titleKey(const titles::Group &group)
+{
+    if (group.id != 0) {
+        return cia::titleIdText(group.id);
+    }
+    char text[24];
+    std::snprintf(text, sizeof(text), "X%016llX",
+                  static_cast<unsigned long long>(group.extData));
+    return text;
+}
+
+const library::ExtData *extDataById(const library::Snapshot &snapshot, uint64_t id)
+{
+    for (const library::ExtData &extData : snapshot.extData) {
+        if (extData.id == id) {
+            return &extData;
+        }
+    }
+    return nullptr;
+}
+
+// What a row that is not installed software shows in place of its size.
+struct Leftover {
+    const char *badge;
+    u32 color;
+    ui::Icon icon;
+};
+
+Leftover leftoverOf(const titles::Group &group)
+{
+    if (!group.pending.empty()) {
+        return {"Unfinished", ui::color::Badge, ui::Icon::Warning};
+    }
+    if (group.update != nullptr) {
+        return {"Update", ui::color::Tag, ui::Icon::Download};
+    }
+    if (group.dlc != nullptr) {
+        return {"DLC", ui::color::Good, ui::Icon::Package};
+    }
+    const ui::Icon icon = group.tickets.empty() ? ui::Icon::Folder : ui::Icon::Lock;
+    if (group.unused) {
+        return {"Unused", ui::color::Neutral, icon};
+    }
+    return {group.tickets.empty() ? "Extra Data" : "Ticket", ui::color::Neutral, icon};
+}
+
+// What is left of software that is gone: "Ticket, extra data".
+std::string leftParts(const titles::Group &group)
+{
+    std::string out;
+    const auto add = [&](const std::string &part) {
+        out += (out.empty() ? "" : ", ") + part;
+    };
+    if (group.update != nullptr) {
+        add("update");
+    }
+    if (group.dlc != nullptr) {
+        add("DLC");
+    }
+    if (!group.tickets.empty()) {
+        add(group.tickets.size() == 1 ? "ticket" : plural(group.tickets.size(), "ticket"));
+    }
+    if (group.hasExtData) {
+        add("extra data");
+    }
+    if (!group.pending.empty()) {
+        add("unfinished install");
+    }
+    if (!out.empty() && out[0] >= 'a' && out[0] <= 'z') {
+        out[0] = static_cast<char>(out[0] - 'a' + 'A');
+    }
+    return out;
+}
+
+std::string backupsText(size_t count)
+{
+    return count == 0 ? "" : plural(count, "backup");
+}
+
+// A row's icon, name and publisher over its facts; order is the list's,
+// when it is in one.
+void drawGroupTop(const std::string &header, const titles::Group &group,
+                  const library::Snapshot &snapshot, const std::string &order = "")
+{
+    ui::drawTopChrome(header, ui::Icon::GameCard, ui::color::IconBlue, order);
+    ui::drawPanel();
+    const float left = ui::TopPanel.x + 18;
+    const float top = ui::TopPanel.y + 12;
+    const titles::Title *software = group.software;
+    const library::ExtData *extData =
+        group.hasExtData ? extDataById(snapshot, group.extData) : nullptr;
+    static const std::vector<uint16_t> NoIcon;
+    const std::vector<uint16_t> &icon =
+        software != nullptr && !software->icon.empty() ? software->icon
+        : extData != nullptr                           ? extData->icon
+                                                       : NoIcon;
+    ui::drawTitleIcon(icon, left, top,
+                      software != nullptr ? iconFor(software->id)
+                                          : leftoverOf(group).icon);
+    ui::drawMarquee(group.name, left + 60, top + 2, 0.62f, ui::color::InkStrong, 280);
+    std::string second;
+    if (software != nullptr) {
+        second = software->publisher.empty() ? cia::kindName(cia::kind(software->id))
+                                             : software->publisher;
+        if (!software->productCode.empty()) {
+            second += "   " + software->productCode;
+        }
+    } else {
+        second = "Not installed";
+    }
+    ui::drawMarquee(second, left + 60, top + 30, ui::type::Small, ui::color::InkSoft, 280);
+    float y = top + 60;
+    if (group.id != 0) {
+        y = ui::drawTagRow(left, y, 76, "Title ID", cia::titleIdText(group.id));
+    } else {
+        char id[20];
+        std::snprintf(id, sizeof(id), "%08llX",
+                      static_cast<unsigned long long>(group.extData));
+        y = ui::drawTagRow(left, y, 76, "Extra data", id);
+    }
+    if (software != nullptr) {
+        const titles::Title &newest = group.update != nullptr ? *group.update : *software;
+        y = ui::drawTagRow(left, y, 76, "Version",
+                           screens::titleVersion(newest.id, newest.version));
+        ui::drawTagRow(left, y, 76, "Size",
+                       units::bytes(group.size()) + ", " + placeName(software->place));
+        return;
+    }
+    y = ui::drawTagRow(left, y, 76, "Left", leftParts(group));
+    if (group.size() > 0) {
+        ui::drawTagRow(left, y, 76, "Size", units::bytes(group.size()));
+    }
+}
+
+} // namespace
+
+bool App::waitForLibrary()
+{
+    std::string error;
+    while (ui::keepRunning() && !library_.complete &&
+           !libraryLoader_.failed(error)) {
+        ui::readInput();
+        ui::BusyView view;
+        view.header = "Titles";
+        view.title = "Reading the installed software...";
+        const uint64_t total = libraryLoader_.total();
+        if (total > 0) {
+            view.progress = true;
+            view.fraction = static_cast<float>(libraryLoader_.done()) / total;
+            view.amount = std::to_string(libraryLoader_.done()) + " of " +
+                          std::to_string(total);
+        }
+        ui::drawBusy(view); // its frame hook takes what arrived
+        gspWaitForVBlank();
+    }
+    if (!library_.complete && libraryLoader_.failed(error)) {
+        ui::message("Titles Unavailable", error, ui::Tone::Error);
+    }
+    return library_.complete;
+}
+
+std::vector<titles::Group> App::titleGroups(const titles::Index &index,
+                                            const std::vector<std::string> &folders) const
+{
+    std::vector<uint64_t> pending;
+    for (const library::PendingTitle &title : library_.pending) {
+        pending.push_back(title.id);
+    }
+    std::vector<uint64_t> extData;
+    std::set<uint64_t> unusedExtData;
+    for (const library::ExtData &each : library_.extData) {
+        extData.push_back(each.id);
+        if (!library::extDataInUse(library_, each.id)) {
+            unusedExtData.insert(each.id);
+        }
+    }
+    const std::vector<uint64_t> unusedList = library::unusedTickets(library_);
+    std::vector<titles::Group> groups = titles::groupTitles(
+        library_.titles, library_.tickets, pending, extData,
+        std::set<uint64_t>(unusedList.begin(), unusedList.end()), unusedExtData);
+    for (titles::Group &group : groups) {
+        if (group.software != nullptr) {
+            group.name = titles::displayName(*group.software, index);
+        } else if (group.id != 0) {
+            group.name = softwareName(group.id, index, folders);
+        }
+        if (group.name.empty() && group.hasExtData) {
+            const library::ExtData *own = extDataById(library_, group.extData);
+            if (own != nullptr) {
+                group.name = own->name;
+            }
+        }
+        if (group.name.empty()) {
+            char text[24];
+            std::snprintf(text, sizeof(text), "Extra data %08llX",
+                          static_cast<unsigned long long>(group.extData));
+            group.name = group.id != 0 ? cia::titleIdText(group.id) : text;
+        }
+    }
+    return groups;
+}
+
+void App::titlesScreen()
+{
+    // Opens at once while the titles are read in the background; the list
+    // fills in as they arrive, and what is left of software that is gone
+    // joins it once everything is read.
+    startLibrary();
+    struct StopReading {
+        library::Loader &loader;
+        ~StopReading() { loader.stop(); }
+    } stopReading {libraryLoader_};
+    const std::vector<std::string> folders = checkpointFolders();
+
+    int cursor = 0;
+    std::string follow; // a row to land on once the list is built again
+    while (ui::keepRunning() && !quit_) {
+        std::vector<titles::Group> shown;
+        ui::ListSpec spec;
+        spec.title = "Titles";
+        spec.emptyText = "No software installed.";
+        spec.headingActions = {{"Sort", "X", KEY_X}};
+        spec.action = "Options";
+        spec.actionKey = "Y";
+        spec.actionKeys = KEY_Y;
+        uint32_t seen = libraryGeneration_ - 1;
+        spec.update = [&]() {
+            if (seen == libraryGeneration_) {
+                return false;
+            }
+            seen = libraryGeneration_;
+            const titles::Index index = titles::indexOf(library_.titles);
+            shown.clear();
+            for (titles::Group &group : titleGroups(index, folders)) {
+                if (softwareShow_ == titles::Show::All ||
+                    (group.software != nullptr &&
+                     titles::shows(softwareShow_, *group.software))) {
+                    shown.push_back(std::move(group));
+                }
+            }
+            titles::sortGroups(shown, settings_.titleSort, settings_.titleSortReverse);
+            spec.items.clear();
+            size_t software = 0;
+            uint64_t bytes = 0;
+            for (const titles::Group &group : shown) {
+                ui::ListItem item;
+                item.key = titleKey(group);
+                item.label = group.name;
+                if (group.software != nullptr) {
+                    item.icon = iconFor(group.software->id);
+                    item.iconColor = ui::color::IconBlue;
+                    item.detail = units::bytes(group.size());
+                    ++software;
+                    bytes += group.size();
+                } else {
+                    const Leftover leftover = leftoverOf(group);
+                    item.icon = leftover.icon;
+                    item.iconColor = ui::color::IconGrey;
+                    item.badge = leftover.badge;
+                    item.badgeColor = leftover.color;
+                    item.labelColor = ui::color::InkSoft;
+                }
+                spec.items.push_back(item);
+            }
+            spec.heading = plural(software, "title") + ", " + units::bytes(bytes);
+            return true;
+        };
+        spec.update();
+        for (size_t row = 0; !follow.empty() && row < shown.size(); ++row) {
+            if (titleKey(shown[row]) == follow) {
+                cursor = static_cast<int>(row);
+            }
+        }
+        follow.clear();
+        spec.loading = [&]() {
+            std::string ignored;
+            return !library_.complete && !libraryLoader_.failed(ignored);
+        };
+        spec.drawTop = [&](int highlighted) {
+            const std::string order = screens::sortDescription(
+                settings_.titleSort, settings_.titleSortReverse);
+            if (highlighted < 0 || highlighted >= static_cast<int>(shown.size())) {
+                ui::drawTopChrome("Titles", ui::Icon::GameCard, ui::color::IconBlue,
+                                  order);
+                ui::drawPanel();
+                ui::drawEmblem(ui::Icon::GameCard, ui::color::IconBlue);
+                return;
+            }
+            drawGroupTop("Titles", shown[highlighted], library_, order);
+        };
+        const ui::ListResult result = ui::runList(spec, cursor);
+        const bool onRow =
+            result.index >= 0 && result.index < static_cast<int>(shown.size());
+        if (onRow) {
+            follow = titleKey(shown[result.index]);
+        }
+        if (result.key == KEY_X) {
+            titleSortScreen();
+            continue;
+        }
+        if (result.key == KEY_Y) {
+            titlesOptions();
+            continue;
+        }
+        if (result.key != KEY_A || !onRow) {
+            return;
+        }
+        titlePage(follow, folders);
+    }
+}
+
+void App::titleSortScreen()
+{
+    static const struct {
+        titles::Show show;
+        const char *label;
+    } Shows[] = {{titles::Show::All, "All"},
+                 {titles::Show::SdCard, "SD Card"},
+                 {titles::Show::SystemMemory, "System Memory"}};
+    int focus = settings_.titleSort == fs::SortOrder::Size ? 1 : 0;
+    // Picks apply at once and the screen stays, like the files' Sort.
+    while (ui::keepRunning() && !quit_) {
+        ui::ScreenSpec spec;
+        spec.back = "Back";
+        const fs::SortOrder orders[] = {fs::SortOrder::Name, fs::SortOrder::Size};
+        for (int index = 0; index < 2; ++index) {
+            ui::Control control;
+            control.rect = {index == 0 ? 26.0f : 164.0f, 29, 130, 40};
+            control.label = index == 0 ? "Name" : "Size";
+            control.style = settings_.titleSort == orders[index]
+                                ? ui::Style::Chosen
+                                : ui::Style::Normal;
+            spec.controls.push_back(control);
+        }
+        ui::Control reverse;
+        reverse.rect = {26, 81, 268, 40};
+        reverse.label = "Reverse Order";
+        reverse.style = settings_.titleSortReverse ? ui::Style::Chosen
+                                                   : ui::Style::Normal;
+        spec.controls.push_back(reverse);
+        for (int index = 0; index < 3; ++index) {
+            ui::Control control;
+            control.rect = {26.0f + index * 92.0f, 139, 84, 40};
+            control.label = Shows[index].label;
+            control.style = Shows[index].show == softwareShow_ ? ui::Style::Chosen
+                                                               : ui::Style::Normal;
+            spec.controls.push_back(control);
+        }
+        spec.drawTop = [&]() {
+            ui::drawTopChrome("Sort", ui::Icon::GameCard, ui::color::IconBlue);
+            ui::drawPanel();
+            std::string showing = "All";
+            for (const auto &each : Shows) {
+                if (each.show == softwareShow_) {
+                    showing = each.label;
+                }
+            }
+            ui::drawFacts({{"Order", screens::sortDescription(settings_.titleSort,
+                                                              settings_.titleSortReverse)},
+                           {"Showing", showing}});
+        };
+        const ui::ScreenResult result = ui::runScreen(spec, focus);
+        if (result.choice == 0 || result.choice == 1) {
+            settings_.titleSort = orders[result.choice];
+            persistSettings();
+        } else if (result.choice == 2) {
+            settings_.titleSortReverse = !settings_.titleSortReverse;
+            persistSettings();
+        } else if (result.choice >= 3 && result.choice < 6) {
+            softwareShow_ = Shows[result.choice - 3].show;
+        } else {
+            return;
+        }
+    }
+}
+
+void App::titlePage(const std::string &key, const std::vector<std::string> &folders)
+{
+    enum class Verb {
+        Launch,
+        Saves,
+        Extra,
+        Seed,
+        Export,
+        RemovePending,
+        DeleteUpdate,
+        DeleteDlc,
+        DeleteExtra,
+        DeleteTickets,
+        DeleteSoftware
+    };
+    // Whether software has save data is asked once: it opens the save.
+    std::map<uint64_t, bool> hasSave;
+    int cursor = 0;
+    while (ui::keepRunning() && !quit_) {
+        titles::Group group;
+        bool gone = false;
+        std::vector<Verb> verbs;
+        savedata::Target saveTarget;
+        savedata::Target extTarget;
+        std::vector<uint64_t> loose; // tickets of what is not installed
+        ui::ListSpec spec;
+        spec.emptyText = "Nothing to change.";
+        // Built again as the library fills in, so rows for tickets and
+        // extra data join once they are read.
+        uint32_t seen = libraryGeneration_ - 1;
+        spec.update = [&]() {
+            if (seen == libraryGeneration_) {
+                return false;
+            }
+            seen = libraryGeneration_;
+            const titles::Index index = titles::indexOf(library_.titles);
+            std::vector<titles::Group> groups = titleGroups(index, folders);
+            const auto found = std::find_if(groups.begin(), groups.end(),
+                                            [&](const titles::Group &each) {
+                                                return titleKey(each) == key;
+                                            });
+            if (found == groups.end()) {
+                gone = true;
+                return false;
+            }
+            group = std::move(*found);
+            spec.title = group.name;
+            spec.items.clear();
+            verbs.clear();
+            loose.clear();
+            const auto add = [&](Verb verb, const std::string &label, ui::Icon icon,
+                                 u32 iconColor, const std::string &detail = "",
+                                 bool danger = false) {
+                ui::ListItem item;
+                item.key = label;
+                item.label = label;
+                item.icon = icon;
+                item.iconColor = iconColor;
+                item.detail = detail;
+                if (danger) {
+                    item.labelColor = ui::color::Bad;
+                }
+                spec.items.push_back(item);
+                verbs.push_back(verb);
+            };
+            const titles::Title *software = group.software;
+            if (software != nullptr) {
+                const cia::Kind kind = cia::kind(software->id);
+                const bool self = software->id == library::runningTitle();
+                if ((kind == cia::Kind::Application || kind == cia::Kind::Demo ||
+                     kind == cia::Kind::DsiWare) &&
+                    !self) {
+                    add(Verb::Launch, "Launch", ui::Icon::Play, ui::color::IconGreen);
+                }
+                saveTarget = savedata::saveOf(*software, library::mediaOf(*software));
+                if (savedata::unsupportedReason(*software).empty()) {
+                    auto known = hasSave.find(software->id);
+                    if (known == hasSave.end()) {
+                        known = hasSave.emplace(software->id,
+                                                savedata::exists(saveTarget)).first;
+                    }
+                    if (known->second) {
+                        add(Verb::Saves, "Save Data", ui::Icon::Chip, ui::color::IconTeal,
+                            backupsText(savedata::backups(saveTarget).size()));
+                    }
+                }
+            }
+            const library::ExtData *extData =
+                group.hasExtData ? extDataById(library_, group.extData) : nullptr;
+            if (group.hasExtData && (software != nullptr || extData != nullptr)) {
+                extTarget = software != nullptr
+                                ? savedata::extDataOf(*software)
+                                : savedata::extDataOf(extData->id,
+                                                      extData->englishShortName,
+                                                      group.name);
+                add(Verb::Extra, "Extra Data", ui::Icon::Folder, ui::color::IconOrange,
+                    backupsText(savedata::backups(extTarget).size()));
+            }
+            if (software != nullptr &&
+                cia::kind(software->id) == cia::Kind::Application) {
+                add(Verb::Seed, "Get Seed", ui::Icon::Seed, ui::color::IconGreen);
+            }
+            if (!group.tickets.empty()) {
+                add(Verb::Export,
+                    group.tickets.size() == 1
+                        ? "Export Ticket"
+                        : "Export " + std::to_string(group.tickets.size()) + " Tickets",
+                    ui::Icon::Lock, ui::color::IconGrey);
+            }
+            // Deleting comes last, in red.
+            if (!group.pending.empty()) {
+                add(Verb::RemovePending, "Remove Unfinished Install", ui::Icon::Trash,
+                    ui::color::IconRed, "", true);
+            }
+            if (group.update != nullptr) {
+                add(Verb::DeleteUpdate, "Delete Update", ui::Icon::Trash,
+                    ui::color::IconRed, units::bytes(group.update->size), true);
+            }
+            if (group.dlc != nullptr) {
+                add(Verb::DeleteDlc, "Delete DLC", ui::Icon::Trash, ui::color::IconRed,
+                    units::bytes(group.dlc->size), true);
+            }
+            if (group.hasExtData) {
+                add(Verb::DeleteExtra, "Delete Extra Data", ui::Icon::Trash,
+                    ui::color::IconRed, "", true);
+            }
+            // An installed title's own ticket only goes with it.
+            for (const uint64_t ticket : group.tickets) {
+                bool own = false;
+                for (const titles::Title *part : {software, group.update, group.dlc}) {
+                    own = own || (part != nullptr && part->id == ticket);
+                }
+                if (!own) {
+                    loose.push_back(ticket);
+                }
+            }
+            if (!loose.empty()) {
+                add(Verb::DeleteTickets,
+                    loose.size() == 1
+                        ? "Delete Ticket"
+                        : "Delete " + std::to_string(loose.size()) + " Tickets",
+                    ui::Icon::Trash, ui::color::IconRed, "", true);
+            }
+            if (software != nullptr && software->place != titles::Place::GameCard &&
+                software->id != library::runningTitle()) {
+                add(Verb::DeleteSoftware, "Delete Software", ui::Icon::Trash,
+                    ui::color::IconRed, units::bytes(software->size), true);
+            }
+            return true;
+        };
+        spec.update();
+        if (gone) {
+            return;
+        }
+        spec.close = [&]() { return gone; };
+        spec.drawTop = [&](int) { drawGroupTop(group.name, group, library_); };
+        const ui::ListResult result = ui::runList(spec, cursor);
+        if (result.key != KEY_A || result.index < 0 ||
+            result.index >= static_cast<int>(verbs.size())) {
+            return;
+        }
+        const std::string name = group.name;
+        std::string error;
+        switch (verbs[result.index]) {
+        case Verb::Launch:
+            if (!installer::launch(group.software->id, error)) {
+                ui::message("Could Not Launch", error, ui::Tone::Error);
+            }
+            break;
+        case Verb::Saves:
+            saveDataScreen(saveTarget, group.software->icon);
+            break;
+        case Verb::Extra: {
+            const library::ExtData *extData = extDataById(library_, group.extData);
+            saveDataScreen(extTarget,
+                           group.software != nullptr && !group.software->icon.empty()
+                               ? group.software->icon
+                           : extData != nullptr ? extData->icon
+                                                : std::vector<uint16_t>());
+            break;
+        }
+        case Verb::Seed: {
+            std::string message;
+            bool added = false;
+            const uint64_t id = group.software->id;
+            if (!tasks::busy("Seeds", "Getting the seed " + name + " needs...",
+                             [&](tasks::Busy &busy) {
+                                 added = installer::installSeed(id, message,
+                                                                &busy.cancel);
+                             },
+                             true)) {
+                break;
+            }
+            ui::message(added ? "Seed Added" : "No Seed Added", message,
+                        added ? ui::Tone::Success : ui::Tone::Warning);
+            break;
+        }
+        case Verb::Export: {
+            const std::string folder = "sdmc:/3ds/3dsDL/tickets/";
+            std::string path;
+            size_t exported = 0;
+            tasks::busy("Tickets", "Exporting...", [&]() {
+                for (const uint64_t ticket : group.tickets) {
+                    exported += library::exportTicket(ticket, folder, path, error) ? 1 : 0;
+                }
+            });
+            sdChanged(folder);
+            if (exported == group.tickets.size()) {
+                ui::message(exported == 1 ? "Ticket Exported" : "Tickets Exported",
+                            exported == 1 ? "Saved as " + path + "."
+                                          : "Saved in " + folder + ".",
+                            ui::Tone::Success);
+            } else {
+                ui::message("Not Exported", error, ui::Tone::Error);
+            }
+            break;
+        }
+        case Verb::RemovePending: {
+            if (!confirmDanger("Clean Up", "Remove the unfinished install of " + name + "?",
+                               "Remove")) {
+                break;
+            }
+            libraryLoader_.stop();
+            bool removed = true;
+            for (const library::PendingTitle &pending : library_.pending) {
+                if (std::find(group.pending.begin(), group.pending.end(), pending.id) !=
+                    group.pending.end()) {
+                    removed = library::deletePending(pending, error) && removed;
+                }
+            }
+            if (!removed) {
+                ui::message("Not Removed", error, ui::Tone::Error);
+            }
+            reloadLibrary();
+            break;
+        }
+        case Verb::DeleteUpdate:
+        case Verb::DeleteDlc:
+        case Verb::DeleteSoftware: {
+            const Verb verb = verbs[result.index];
+            // A copy: deleting takes it out of the library it points into.
+            const titles::Title title = verb == Verb::DeleteUpdate ? *group.update
+                                        : verb == Verb::DeleteDlc  ? *group.dlc
+                                                                   : *group.software;
+            const std::string question =
+                verb == Verb::DeleteUpdate ? "Delete the update for " + name + "?"
+                : verb == Verb::DeleteDlc  ? "Delete the DLC for " + name + "?"
+                                           : "Delete " + name + " and its save data?";
+            if (!confirmDanger("Delete", question, "Delete")) {
+                break;
+            }
+            bool deleted = false;
+            libraryLoader_.stop();
+            tasks::busy("Delete", "Deleting...", [&]() {
+                deleted = library::deleteTitle(title, false, error);
+            });
+            if (!deleted) {
+                ui::message("Not Deleted", error, ui::Tone::Error);
+            }
+            // Its ticket stays, and with it the row, until it goes too.
+            if (deleted && library_.complete) {
+                library::forgetTitle(library_, title, false);
+                ++libraryGeneration_;
+            } else {
+                reloadLibrary();
+            }
+            break;
+        }
+        case Verb::DeleteExtra:
+            if (confirmDanger("Delete", "Delete the extra data of " + name + "?",
+                              "Delete")) {
+                // The reader stops first, so nothing is read while it changes.
+                libraryLoader_.stop();
+                if (!library::deleteExtData(group.extData, error)) {
+                    ui::message("Not Deleted", error, ui::Tone::Error);
+                }
+                reloadLibrary();
+            }
+            break;
+        case Verb::DeleteTickets:
+            deleteTickets(loose, name);
+            break;
+        }
+    }
+}
+
+void App::deleteTickets(const std::vector<uint64_t> &tickets, const std::string &name)
+{
+    // Installed software does not start without its ticket. Asked fresh,
+    // so a misread list never words it as harmless.
+    const std::vector<uint64_t> unusedList = library::unusedTickets(library_);
+    bool needed = false;
+    for (const uint64_t ticket : tickets) {
+        needed = needed || library::installedAnywhere(ticket) ||
+                 library_.onSdCard.count(ticket) != 0 ||
+                 std::find(unusedList.begin(), unusedList.end(), ticket) ==
+                     unusedList.end();
+    }
+    const std::string what = tickets.size() == 1 ? "the ticket"
+                                                 : plural(tickets.size(), "ticket");
+    if (!confirmDanger("Delete",
+                       needed ? "Delete " + what + " " + name + " needs to start?"
+                              : "Delete " + what + " for " + name + "?",
+                       "Delete")) {
+        return;
+    }
+    std::string error;
+    std::string failure;
+    std::vector<uint64_t> unsaved;
+    std::string unsavedWhy;
+    for (const uint64_t ticket : tickets) {
+        bool couldNotSave = false;
+        if (library::deleteTicket(ticket, error, &couldNotSave)) {
+            continue;
+        }
+        if (couldNotSave) {
+            unsaved.push_back(ticket);
+            unsavedWhy = error;
+        } else {
+            failure = error;
+        }
+    }
+    // One the console will not export can still go, once the person has
+    // seen what it is.
+    std::map<uint64_t, library::TicketFacts> shown;
+    if (!unsaved.empty() && confirmUnsavedTickets(unsaved, unsavedWhy, shown)) {
+        for (const uint64_t ticket : unsaved) {
+            if (!library::deleteTicket(ticket, error, nullptr, &shown[ticket])) {
+                failure = error;
+            }
+        }
+    }
+    sdChanged(library::DeletedTicketsFolder);
+    if (!failure.empty()) {
+        ui::message("Not Deleted", failure, ui::Tone::Error);
+    }
+    reloadLibrary();
+}
+
+void App::titlesOptions()
+{
+    // Each of these decides from everything that is installed.
+    if (!waitForLibrary()) {
+        return;
+    }
+    while (ui::keepRunning() && !quit_) {
+        const size_t pending = library_.pending.size();
+        const size_t unused = library::unusedTickets(library_).size();
+        const size_t saved = library::deletedTicketCount();
+        std::string seeds;
+        for (const char *place : SeedDbPlaces) {
+            if (seeds.empty() && fs::fileExists(place)) {
+                seeds = place;
+            }
+        }
+        const std::vector<ui::MenuItem> items = {
+            {"Add Seeds", false, true, ui::Icon::Seed,
+             ui::color::IconGreen},
+            {"Restore Deleted Tickets", false, saved > 0, ui::Icon::History,
+             ui::color::IconGreen},
+            {"Remove Unfinished Installs", true, pending > 0, ui::Icon::Trash,
+             ui::color::IconRed},
+            {"Delete Unused Tickets", true, unused > 0, ui::Icon::Trash,
+             ui::color::IconRed}};
+        const int choice = ui::menu(items, [&](int) {
+            ui::drawTopChrome("Titles", ui::Icon::GameCard, ui::color::IconBlue);
+            ui::drawPanel();
+            ui::drawFacts({{"Seeds", seeds.empty() ? "No seeddb.bin" : seeds,
+                            seeds.empty() ? ui::color::Neutral : ui::color::Tag},
+                           {"Saved", plural(saved, "deleted ticket")},
+                           {"Unfinished", plural(pending, "install"),
+                            pending > 0 ? ui::color::Badge : ui::color::Tag},
+                           {"Unused", plural(unused, "ticket")}});
+        });
+        if (choice == 0) {
+            importSeeds();
+        } else if (choice == 1) {
+            std::string error;
+            size_t restored = 0;
+            tasks::busy("Tickets", "Restoring deleted tickets...", [&]() {
+                restored = library::restoreDeletedTickets(error);
+            });
+            sdChanged(library::DeletedTicketsFolder);
+            ui::message(restored == saved ? "Tickets Restored"
+                                          : "Some Tickets Not Restored",
+                        plural(restored, "ticket") + " of " +
+                            std::to_string(saved) + " restored.",
+                        restored == saved ? ui::Tone::Success : ui::Tone::Warning,
+                        error);
+            reloadLibrary();
+        } else if (choice == 2) {
+            if (!confirmDanger("Clean Up",
+                               "Remove " + plural(pending, "unfinished install") + "?",
+                               "Remove")) {
+                continue;
+            }
+            size_t removed = 0;
+            std::string error;
+            tasks::busy(
+                "Clean Up", "Removing unfinished installs...",
+                [&](tasks::Busy &busy) {
+                    busy.total = library_.pending.size();
+                    for (const library::PendingTitle &title : library_.pending) {
+                        if (library::deletePending(title, error)) {
+                            ++removed;
+                        }
+                        busy.done.fetch_add(1);
+                    }
+                },
+                false);
+            ui::message(removed == pending ? "Cleaned Up" : "Some Remain",
+                        plural(removed, "unfinished install") + " removed.",
+                        removed == pending ? ui::Tone::Success : ui::Tone::Warning,
+                        error);
+            reloadLibrary();
+        } else if (choice == 3) {
+            deleteUnusedTickets();
+        } else {
+            return;
+        }
+    }
 }

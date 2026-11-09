@@ -211,12 +211,24 @@ private:
     void startIndexLoad();
     void pollIndex();
     void saveIndex();
-    void titleList(bool software);
+    // Waits, with a progress bar, until everything is read; false, after
+    // saying why, when it could not be.
+    bool waitForLibrary();
+    // The Titles list's rows as the library stands, named; folders are
+    // Checkpoint's, for naming what is gone (see softwareName).
+    std::vector<titles::Group> titleGroups(const titles::Index &index,
+                                           const std::vector<std::string> &folders) const;
     // Order (saved) and what the list shows (until 3dsDL closes).
-    void titleSortScreen(bool software);
-    void titleOptions(titles::Title title);
-    void extraDataScreen();
-    void ticketsScreen();
+    void titleSortScreen();
+    // One row's page: what can be done with it, deleting last. key names
+    // the row (titleKey); the page closes when nothing of it is left.
+    void titlePage(const std::string &key, const std::vector<std::string> &folders);
+    // The jobs for all titles: unfinished installs, unused and deleted
+    // tickets, seeds.
+    void titlesOptions();
+    // Deletes tickets of software that is not installed, after asking,
+    // saving each first or saying it cannot be.
+    void deleteTickets(const std::vector<uint64_t> &tickets, const std::string &name);
     void deleteUnusedTickets();
     // A name for software that may be gone: installed, remembered from when
     // it was (knownNames_), or from a Checkpoint backup folder in folders;
@@ -231,11 +243,9 @@ private:
     bool confirmUnsavedTickets(const std::vector<uint64_t> &tickets,
                                const std::string &why,
                                std::map<uint64_t, library::TicketFacts> &shown);
-    void cleanUpScreen();
     void importSeeds();
 
     // Save data and extra data, in saves_screens.cpp.
-    void saveTitlesScreen();
     void saveDataScreen(const savedata::Target &target,
                         const std::vector<uint16_t> &icon);
     void dataBrowser(const savedata::Target &target);
@@ -352,7 +362,6 @@ private:
     std::unique_ptr<fileindex::Index> loadingIndex_;
     std::atomic<bool> indexLoaded_ {false};
     titles::Show softwareShow_ = titles::Show::All;
-    titles::Show addOnShow_ = titles::Show::All;
     std::vector<QueuedLink> queue_;
     uint64_t nextQueueId_ = 1;
     // What Receive has taken in and sent out since 3dsDL started.
