@@ -88,9 +88,19 @@ struct UploadBatch {
 // False when the header is missing or malformed.
 bool uploadBatch(const HttpRequest &request, UploadBatch &out);
 
-// A whole response with Connection: close.
+// A whole response with Connection: close. headers are extra header lines,
+// each ending in CRLF.
 std::string httpResponse(int status, const std::string &contentType,
-                         const std::string &body);
+                         const std::string &body,
+                         const std::string &headers = "");
+
+// The key a browser Receive always allows carries in its cookie (see
+// KnownDevice), or "" when the request has none that could be one.
+std::string deviceKey(const HttpRequest &request);
+// The Set-Cookie line, with its CRLF, that gives a browser key for a year.
+// Only the console's page sends it back (SameSite=Strict), and scripts
+// cannot read it.
+std::string deviceKeyHeader(const std::string &key);
 
 // The file API answers in JSON: {"error":"message"} for failures.
 std::string jsonString(const std::string &value);

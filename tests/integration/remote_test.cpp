@@ -643,7 +643,7 @@ TEST("remote server: the file API turns away what it should")
     net::FileSharing sharing;
     sharing.root = root.path;
     bool asked = false;
-    sharing.access = [&](const std::string &from, const std::string &device, bool ask) {
+    sharing.access = [&](const std::string &from, const std::string &device, const std::string &, bool ask) {
         CHECK_EQ(from, std::string("127.0.0.1"));
         CHECK(device.empty());
         asked = asked || ask;
@@ -698,6 +698,61 @@ TEST("remote server: the file API turns away what it should")
           std::string::npos);
     // Links never need permission.
     CHECK(startsWith(get(port, "/"), "HTTP/1.1 200"));
+}
+
+TEST("remote server: a browser always allowed gets a key, and the key lets it in")
+{
+    TempRoot root;
+    const std::string key = "0123456789abcdef0123456789abcdef";
+    std::string give;
+    std::vector<std::string> keys;
+    net::FileSharing sharing;
+    sharing.root = root.path;
+    sharing.access = [&](const std::string &, const std::string &, const std::string &got,
+                         bool) {
+        keys.push_back(got);
+        return got == key || !give.empty() ? net::Access::Allowed : net::Access::Pending;
+    };
+    sharing.keyFor = [&](const std::string &) { return give; };
+    net::Receiver receiver;
+    std::string error;
+    CHECK(receiver.open(0, 0, 0, error));
+    receiver.shareFiles(sharing);
+    Serving serving(receiver);
+    const unsigned short port = receiver.webPort();
+    const auto status = [&](const std::string &cookie) {
+        return roundTrip(port, "GET /api/status HTTP/1.1\r\nHost: 127.0.0.1\r\n" +
+                                   (cookie.empty() ? "" : "Cookie: " + cookie + "\r\n") +
+                                   "\r\n");
+    };
+
+    // Not allowed yet: no key.
+    std::string response = status("");
+    CHECK(bodyOf(response).find("\"access\":\"pending\"") != std::string::npos);
+    CHECK(response.find("Set-Cookie") == std::string::npos);
+
+    // Always Allow: the next poll hands the key over, for the page only.
+    give = key;
+    response = status("other=1");
+    CHECK(response.find("Set-Cookie: 3dsdl_device=" + key +
+                        "; Max-Age=31536000; Path=/; HttpOnly; SameSite=Strict\r\n") !=
+          std::string::npos);
+    // A browser that has it is not given it again.
+    CHECK(status("3dsdl_device=" + key).find("Set-Cookie") == std::string::npos);
+
+    // Later, from any address, the key alone lets it in.
+    give.clear();
+    keys.clear();
+    response = roundTrip(port, "GET /api/list?path=%2F HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                               "Cookie: theme=dark; 3dsdl_device=" + key + "\r\n\r\n");
+    CHECK(startsWith(response, "HTTP/1.1 200"));
+    CHECK(keys.size() == 1 && keys[0] == key);
+    // Anything that is not a key is no key.
+    keys.clear();
+    CHECK(startsWith(roundTrip(port, "GET /api/list?path=%2F HTTP/1.1\r\nHost: 127.0.0.1\r\n"
+                                     "Cookie: 3dsdl_device=" + key.substr(1) + "x\r\n\r\n"),
+                     "HTTP/1.1 403"));
+    CHECK(keys.size() == 1 && keys[0].empty());
 }
 
 TEST("remote server: a silent spare connection does not hold up the next")
@@ -758,7 +813,7 @@ TEST("remote server: the code editor comes once for each version, to anyone")
     CHECK(fs::writeFile(script, "not really gzip"));
     net::FileSharing sharing;
     sharing.root = root.path;
-    sharing.access = [](const std::string &, const std::string &, bool) {
+    sharing.access = [](const std::string &, const std::string &, const std::string &, bool) {
         return net::Access::Unknown;
     };
     sharing.editorScript = script;
@@ -807,7 +862,7 @@ TEST("remote server: status, links for the page, hidden files and titles")
     net::FileSharing sharing;
     sharing.root = root.path;
     bool allowed = false;
-    sharing.access = [&](const std::string &from, const std::string &, bool ask) {
+    sharing.access = [&](const std::string &from, const std::string &, const std::string &, bool ask) {
         std::lock_guard<std::mutex> hold(lock);
         if (allowed) {
             return net::Access::Allowed;
@@ -881,7 +936,7 @@ TEST("remote server: uploads say who sent them and where they stand in the batch
     std::string asking;
     net::FileSharing sharing;
     sharing.root = root.path;
-    sharing.access = [&](const std::string &, const std::string &device, bool ask) {
+    sharing.access = [&](const std::string &, const std::string &device, const std::string &, bool ask) {
         std::lock_guard<std::mutex> hold(lock);
         if (ask) {
             asking = device;
@@ -1011,7 +1066,7 @@ TEST("remote server: a send says if 3dsDL's page made it, holds 20 links, and a 
     bool turnedAway = false;
     net::FileSharing sharing;
     // Turning down file access is a list of its own.
-    sharing.access = [&](const std::string &, const std::string &, bool) {
+    sharing.access = [&](const std::string &, const std::string &, const std::string &, bool) {
         return net::Access::Denied;
     };
     sharing.refuseLinks = [&](const std::string &from) {

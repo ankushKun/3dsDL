@@ -505,3 +505,23 @@ TEST("remote: a sender's loose file in /3ds/ is an app or nothing")
     CHECK(!remote::sentArchive({"3ds/3dsDL /settings.ini"}, "a.zip", archive));
     CHECK(!remote::sendFolderAllowed("sdmc:/3ds/3dsDL."));
 }
+
+TEST("remote: a device key comes from its cookie, and goes back only to the page")
+{
+    const std::string key = "0123456789abcdef0123456789abcdef";
+    remote::HttpRequest request;
+    CHECK(remote::deviceKey(request).empty());
+    request.headers["cookie"] = "a=1; 3dsdl_device=" + key + "; b=2";
+    CHECK_EQ(remote::deviceKey(request), key);
+    request.headers["cookie"] = "x3dsdl_device=" + key;
+    CHECK(remote::deviceKey(request).empty());
+    request.headers["cookie"] = "3dsdl_device=" + key + "0";
+    CHECK(remote::deviceKey(request).empty());
+    CHECK_EQ(remote::deviceKeyHeader(key),
+             "Set-Cookie: 3dsdl_device=" + key +
+                 "; Max-Age=31536000; Path=/; HttpOnly; SameSite=Strict\r\n");
+    const std::string response =
+        remote::httpResponse(200, "text/plain", "hi", remote::deviceKeyHeader(key));
+    CHECK(response.find("\r\nSet-Cookie: 3dsdl_device=") != std::string::npos);
+    CHECK(response.find("Connection: close\r\n\r\nhi") != std::string::npos);
+}

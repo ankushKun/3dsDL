@@ -183,6 +183,8 @@ private:
 
     void historyScreen();
     bool confirmClearHistory();
+    // Forgets the browsers Receive's Always Allow lets in, once asked.
+    void confirmForgetDevices();
     void settingsScreen();
     void aboutScreen();
     // Where to report a problem, as QR codes to scan, in report.cpp.

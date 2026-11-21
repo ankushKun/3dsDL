@@ -91,10 +91,14 @@ struct FileSharing {
     // Whether the device at an address may use the files. When ask is set
     // and the device is unknown, the console asks and the answer is Pending
     // until it is given; without ask an unknown device is Unknown. device
-    // names it for that question, as in Received. Unset allows everyone.
+    // names it for that question, as in Received, and key is the one its
+    // cookie carries (remote::deviceKey), "" for none. Unset allows everyone.
     std::function<Access(const std::string &from, const std::string &device,
-                         bool ask)>
+                         const std::string &key, bool ask)>
         access;
+    // The key to give the browser at an address in a cookie, once the
+    // console always allows it; "" for none. Unset gives none.
+    std::function<std::string(const std::string &from)> keyFor;
     // Whether links from an address are turned away before they reach the
     // console, such as a device the console said Don't Allow to. A list of
     // its own: answering the file question does not touch it. Unset takes

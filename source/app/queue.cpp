@@ -79,6 +79,23 @@ std::string localAddress()
     return inet_ntoa(address);
 }
 
+// A key for a browser Always Allow lets in, from the system's random source
+// (SSLC, opened at start for Mbed TLS). "" when it gives nothing.
+std::string newDeviceKey()
+{
+    uint8_t bytes[DeviceKeyLength / 2] = {};
+    if (R_FAILED(sslcGenerateRandomData(bytes, sizeof(bytes)))) {
+        return "";
+    }
+    static const char digits[] = "0123456789abcdef";
+    std::string key;
+    for (const uint8_t byte : bytes) {
+        key += digits[byte >> 4];
+        key += digits[byte & 15];
+    }
+    return key;
+}
+
 // The name the console answers to on the network, as in http://3ds.local/.
 constexpr const char *NetworkName = "3ds";
 
@@ -101,6 +118,10 @@ struct ReceiveJob {
     std::deque<Asker> asking;
     std::set<std::string> allowed;
     std::set<std::string> denied;
+    // Keys of the browsers Always Allow let in (Settings' devices), and the
+    // key each address was given this time, for its cookie.
+    std::set<std::string> knownKeys;
+    std::map<std::string, std::string> keys;
     // Devices whose links Don't Allow turned away, a list of their own.
     std::set<std::string> linksDenied;
     // The console's own address: it never sends itself links or asks
@@ -138,12 +159,27 @@ struct ReceiveJob {
         return any;
     }
 
-    void answer(const std::string &from, bool allow)
+    // key, when not empty, lets the browser at from in from now on.
+    void answer(const std::string &from, bool allow, const std::string &key = "")
     {
         LightLock_Lock(&lock);
         (allow ? allowed : denied).insert(from);
         (allow ? denied : allowed).erase(from);
+        if (allow && !key.empty()) {
+            knownKeys.insert(key);
+            keys[from] = key;
+        }
         LightLock_Unlock(&lock);
+    }
+
+    // Runs on the listener's thread.
+    std::string keyFor(const std::string &from)
+    {
+        LightLock_Lock(&lock);
+        const auto found = keys.find(from);
+        const std::string key = found == keys.end() ? "" : found->second;
+        LightLock_Unlock(&lock);
+        return key;
     }
 
     bool fromConsole(const std::string &from) const
@@ -183,7 +219,7 @@ struct ReceiveJob {
 
     // Runs on the listener's thread.
     net::Access access(const std::string &from, const std::string &device,
-                       bool ask)
+                       const std::string &key, bool ask)
     {
         if (fromConsole(from)) {
             return net::Access::Denied;
@@ -193,7 +229,8 @@ struct ReceiveJob {
         const bool waiting =
             std::any_of(asking.begin(), asking.end(),
                         [&](const Asker &asker) { return asker.from == from; });
-        if (allowed.count(from) != 0) {
+        if (allowed.count(from) != 0 ||
+            (!key.empty() && knownKeys.count(key) != 0)) {
             result = net::Access::Allowed;
         } else if (denied.count(from) != 0) {
             result = net::Access::Denied;
@@ -1131,8 +1168,14 @@ void App::receiveScreen()
         place(sharing.favorites, favorite);
     }
     job.self = localAddress();
+    for (const KnownDevice &device : settings_.devices) {
+        job.knownKeys.insert(device.key);
+    }
     sharing.access = [&job](const std::string &from, const std::string &device,
-                            bool ask) { return job.access(from, device, ask); };
+                            const std::string &key, bool ask) {
+        return job.access(from, device, key, ask);
+    };
+    sharing.keyFor = [&job](const std::string &from) { return job.keyFor(from); };
     sharing.refuseLinks = [&job](const std::string &from) {
         return job.refusesLinks(from);
     };
@@ -1278,8 +1321,8 @@ void App::receiveScreen()
         dialog.header = "Receive";
         dialog.title = "Let " + who + " manage files on the SD card?";
         dialog.tone = ui::Tone::Warning;
-        dialog.buttons = {"Allow", "Don't Allow"};
-        dialog.cancelButton = 1;
+        dialog.buttons = {"Allow", "Always Allow", "Don't Allow"};
+        dialog.cancelButton = 2;
         dialog.drawTop = [&]() {
             ui::drawTopChrome("Receive", ui::Icon::Chip, ui::color::IconPink);
             ui::drawPanel();
@@ -1288,11 +1331,19 @@ void App::receiveScreen()
                 facts.push_back({"Device", asker.device});
             }
             facts.push_back({"Address", asker.from});
-            facts.push_back({"Until", "You leave Receive"});
             ui::drawFacts(facts);
         };
         job.setState("asking", "Asking whether " + who + " may use the SD card.");
-        job.answer(asker.from, ui::choose(dialog) == 0);
+        const int choice = ui::choose(dialog);
+        std::string key;
+        if (choice == 1) {
+            key = newDeviceKey();
+            if (!key.empty()) {
+                settings_.devices.push_back({key, asker.device});
+                persistSettings();
+            }
+        }
+        job.answer(asker.from, choice == 0 || choice == 1, key);
         job.setState("ready");
     };
 

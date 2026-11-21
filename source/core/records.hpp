@@ -22,6 +22,17 @@ enum class CiaAction { Ask, Install, InstallAndDelete, Keep };
 // dislike it.
 constexpr int MaxDownloadConnections = 4;
 
+// A browser Receive always allows, known by the key in its cookie
+// (remote::deviceKey) rather than by its address, which the router may give
+// to another device later. name is what it said it was, to list it by.
+struct KnownDevice {
+    std::string key;
+    std::string name;
+};
+constexpr size_t DeviceKeyLength = 32;
+// DeviceKeyLength lower-case hex digits.
+bool isDeviceKey(const std::string &key);
+
 struct Settings {
     std::string destination = "sdmc:/";
     bool resumeDownloads = true;
@@ -45,6 +56,8 @@ struct Settings {
     int timeZoneMinutes = 0;
     // Files' favourites, as favorites.hpp keeps them.
     std::vector<std::string> favorites;
+    // Browsers Receive lets in without asking.
+    std::vector<KnownDevice> devices;
 };
 
 Settings parseSettings(const std::string &contents);

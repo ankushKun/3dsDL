@@ -6,6 +6,7 @@
 #include "file_types.hpp"
 #include "finalize.hpp"
 #include "naming.hpp"
+#include "records.hpp"
 #include "text.hpp"
 #include "title_meta.hpp"
 #include "url.hpp"
@@ -330,15 +331,52 @@ bool uploadBatch(const HttpRequest &request, UploadBatch &out)
 }
 
 std::string httpResponse(int status, const std::string &contentType,
-                         const std::string &body)
+                         const std::string &body, const std::string &headers)
 {
     std::string response = "HTTP/1.1 " + std::to_string(status) + " " +
                            statusText(status) + "\r\n";
     response += "Content-Type: " + contentType + "\r\n";
     response += "Content-Length: " + std::to_string(body.size()) + "\r\n";
     response += "Cache-Control: no-store\r\n";
+    response += headers;
     response += "Connection: close\r\n\r\n";
     return response + body;
+}
+
+namespace {
+constexpr const char *DeviceCookie = "3dsdl_device";
+}
+
+std::string deviceKey(const HttpRequest &request)
+{
+    const auto cookies = request.headers.find("cookie");
+    if (cookies == request.headers.end()) {
+        return "";
+    }
+    const std::string &all = cookies->second;
+    const std::string name = std::string(DeviceCookie) + "=";
+    size_t start = 0;
+    while (start < all.size()) {
+        size_t end = all.find(';', start);
+        if (end == std::string::npos) {
+            end = all.size();
+        }
+        const std::string cookie = text::trim(all.substr(start, end - start));
+        if (cookie.compare(0, name.size(), name) == 0) {
+            const std::string key = cookie.substr(name.size());
+            if (isDeviceKey(key)) {
+                return key;
+            }
+        }
+        start = end + 1;
+    }
+    return "";
+}
+
+std::string deviceKeyHeader(const std::string &key)
+{
+    return "Set-Cookie: " + std::string(DeviceCookie) + "=" + key +
+           "; Max-Age=31536000; Path=/; HttpOnly; SameSite=Strict\r\n";
 }
 
 std::string jsonString(const std::string &value)

@@ -251,3 +251,26 @@ TEST("records: partial paths and Content-Range")
     CHECK_EQ(contentRangeTotal("bytes 100-199/*"), static_cast<int64_t>(-1));
     CHECK_EQ(contentRangeTotal(""), static_cast<int64_t>(-1));
 }
+
+TEST("settings: Receive's known devices, once each, with valid keys only")
+{
+    const std::string a = "0123456789abcdef0123456789abcdef";
+    const std::string b = "fedcba9876543210fedcba9876543210";
+    Settings settings;
+    settings.devices = {{a, "Windows PC"}, {b, ""}};
+    const Settings again = parseSettings(serializeSettings(settings));
+    CHECK_EQ(again.devices.size(), static_cast<size_t>(2));
+    if (again.devices.size() == 2) {
+        CHECK_EQ(again.devices[0].key, a);
+        CHECK_EQ(again.devices[0].name, std::string("Windows PC"));
+        CHECK_EQ(again.devices[1].key, b);
+        CHECK(again.devices[1].name.empty());
+    }
+    const Settings parsed = parseSettings(
+        "device=" + a + " Mac\ndevice=" + a + " iPhone\n"
+        "device=0123456789ABCDEF0123456789ABCDEF Mac\ndevice=short Mac\ndevice=\n");
+    CHECK_EQ(parsed.devices.size(), static_cast<size_t>(1));
+    CHECK(isDeviceKey(a));
+    CHECK(!isDeviceKey(a + "0"));
+    CHECK(!isDeviceKey("0123456789abcdef0123456789abcdeg"));
+}

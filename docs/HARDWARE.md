@@ -263,6 +263,11 @@ with a few hundred files.
 58. SHA-256 of a downloaded 3dsDL.cia next to 3dsDL.sha256 says it matches.
 58a. Files on the Receive page: the console asks Allow or Don't Allow for
     the phone; Don't Allow keeps the page waiting until Receive reopens.
+58a2. Always Allow for a computer's browser (issue #28): leave Receive and
+    come back, and the page lists folders without a question, from a new
+    address too. Another browser on the same computer is still asked.
+    Settings > Other Settings > Forget Allowed Devices shows its count, and
+    after Forget the page is asked about again.
 58b. Upload a CIA of 1 GiB or more from a phone and from a computer: the
     top screen and its row show progress, the console does not sleep with the lid
     closed, and the file's SHA-256 matches. Note the speed.

@@ -752,21 +752,31 @@ const char *accessName(Access access)
 
 // What the console is doing. Anyone may ask, so the links page can follow
 // along too; only an allowed device hears the details, which can name files.
-void sendStatus(int client, const FileSharing &sharing, const std::string &from)
+void sendStatus(int client, const FileSharing &sharing, const std::string &from,
+                const remote::HttpRequest &request)
 {
+    const std::string key = remote::deviceKey(request);
     const Access access = sharing.root.empty() ? Access::Unknown
-                          : sharing.access     ? sharing.access(from, "", false)
-                                               : Access::Allowed;
+                          : sharing.access ? sharing.access(from, "", key, false)
+                                           : Access::Allowed;
+    // The page polls this, so the browser just always allowed learns its key
+    // here.
+    const std::string give =
+        access == Access::Allowed && sharing.keyFor ? sharing.keyFor(from) : "";
+    const std::string headers =
+        give.empty() || give == key ? "" : remote::deviceKeyHeader(give);
     const ConsoleStatus status = sharing.status ? sharing.status() : ConsoleStatus();
     const bool allowed = access == Access::Allowed || status.open;
-    sendJson(client, "{\"you\":" + remote::jsonString(from) +
+    sendAll(client, remote::httpResponse(200, "application/json",
+                         "{\"you\":" + remote::jsonString(from) +
                          ",\"access\":\"" + accessName(access) +
                          "\",\"files\":" + (sharing.root.empty() ? "false" : "true") +
                          ",\"state\":" + remote::jsonString(status.state) +
                          ",\"text\":" + remote::jsonString(allowed ? status.text : "") +
                          ",\"result\":" + remote::jsonString(allowed ? status.result : "") +
                          ",\"resultOk\":" + (status.resultOk ? "true" : "false") +
-                         ",\"resultSeq\":" + std::to_string(status.resultSeq) + "}");
+                         ",\"resultSeq\":" + std::to_string(status.resultSeq) + "}",
+                         headers));
 }
 
 void sendFile(int client, const FileSharing &sharing, const std::string &from,
@@ -1030,7 +1040,7 @@ bool serveApi(int client, const FileSharing &sharing, const std::string &from,
         return false;
     }
     if (request.path == "/api/status" && request.method == "GET") {
-        sendStatus(client, sharing, from);
+        sendStatus(client, sharing, from, request);
         return false;
     }
     if (sharing.root.empty()) {
@@ -1039,7 +1049,8 @@ bool serveApi(int client, const FileSharing &sharing, const std::string &from,
     }
     const std::string device = deviceOf(request);
     const Access access =
-        sharing.access ? sharing.access(from, device, true) : Access::Allowed;
+        sharing.access ? sharing.access(from, device, remote::deviceKey(request), true)
+                       : Access::Allowed;
     if (access != Access::Allowed) {
         const bool pending = access == Access::Pending;
         sendAll(client,

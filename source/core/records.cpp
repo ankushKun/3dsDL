@@ -5,6 +5,7 @@
 #include "text.hpp"
 #include "timezone.hpp"
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <sstream>
@@ -160,6 +161,14 @@ uint64_t fnv1a64(const std::string &value)
 
 } // namespace
 
+bool isDeviceKey(const std::string &key)
+{
+    return key.size() == DeviceKeyLength &&
+           std::all_of(key.begin(), key.end(), [](char c) {
+               return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
+           });
+}
+
 Settings parseSettings(const std::string &contents)
 {
     Settings settings;
@@ -228,6 +237,18 @@ Settings parseSettings(const std::string &contents)
         } else if (key == "favorite" && naming::isSdPath(value) &&
                    !favorites::contains(settings.favorites, value)) {
             settings.favorites.push_back(value);
+        } else if (key == "device") {
+            const size_t space = value.find(' ');
+            KnownDevice device;
+            device.key = value.substr(0, space);
+            device.name =
+                space == std::string::npos ? "" : text::trim(value.substr(space + 1));
+            const bool known = std::any_of(
+                settings.devices.begin(), settings.devices.end(),
+                [&](const KnownDevice &other) { return other.key == device.key; });
+            if (isDeviceKey(device.key) && !known) {
+                settings.devices.push_back(device);
+            }
         }
     });
     return settings;
@@ -262,6 +283,13 @@ std::string serializeSettings(const Settings &settings)
     }
     for (const std::string &favorite : settings.favorites) {
         output += "favorite=" + text::singleLine(favorite) + "\n";
+    }
+    for (const KnownDevice &device : settings.devices) {
+        output += "device=" + device.key;
+        if (!device.name.empty()) {
+            output += " " + text::singleLine(device.name);
+        }
+        output += "\n";
     }
     return output;
 }

@@ -1767,6 +1767,37 @@ bool App::confirmClearHistory()
     return true;
 }
 
+void App::confirmForgetDevices()
+{
+    ui::Dialog dialog;
+    dialog.header = "Receive";
+    dialog.title =
+        "Forget " + plural(settings_.devices.size(), "allowed device") + "?";
+    dialog.tone = ui::Tone::Warning;
+    dialog.buttons = {"Forget", "Cancel"};
+    dialog.dangerous = 0;
+    dialog.initial = 1;
+    dialog.cancelButton = 1;
+    dialog.drawTop = [&]() {
+        ui::drawTopChrome("Receive", ui::Icon::Chip, ui::color::IconPink);
+        ui::drawPanel();
+        std::vector<ui::Fact> facts;
+        for (const KnownDevice &device : settings_.devices) {
+            if (facts.size() == 5) {
+                facts.push_back({"And", plural(settings_.devices.size() - 5, "more")});
+                break;
+            }
+            facts.push_back({"Device", device.name.empty() ? "Browser" : device.name});
+        }
+        ui::drawFacts(facts);
+    };
+    if (ui::choose(dialog) != 0) {
+        return;
+    }
+    settings_.devices.clear();
+    persistSettings();
+}
+
 void App::historyScreen()
 {
     int cursor = 0;
@@ -2088,7 +2119,10 @@ void App::settingsScreen()
                     {"Sounds", sound::available() ? onOff(settings_.sounds)
                                                   : "Unavailable"},
                     {"Clear Download History",
-                     std::to_string(history_.size())}};
+                     std::to_string(history_.size())},
+                    // Browsers Receive's Always Allow lets in.
+                    {"Forget Allowed Devices",
+                     std::to_string(settings_.devices.size())}};
             },
             [&](int index) {
                 if (index == 0) {
@@ -2105,10 +2139,16 @@ void App::settingsScreen()
                         onOffChoice("Sounds", settings_.sounds);
                         sound::setEnabled(settings_.sounds);
                     }
-                } else if (history_.empty()) {
-                    ui::message("History Is Empty", "There is nothing to clear.");
+                } else if (index == 3) {
+                    if (history_.empty()) {
+                        ui::message("History Is Empty", "There is nothing to clear.");
+                    } else {
+                        confirmClearHistory();
+                    }
+                } else if (settings_.devices.empty()) {
+                    ui::message("No Allowed Devices", "There is nothing to forget.");
                 } else {
-                    confirmClearHistory();
+                    confirmForgetDevices();
                 }
             });
     };
