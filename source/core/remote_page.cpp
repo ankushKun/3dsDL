@@ -1356,7 +1356,8 @@ items.addEventListener('click', e => {
   const node = e.target.closest('.item');
   if (!node || swallow) { swallow = false; return; }
   const path = node.dataset.path;
-  if (e.target.classList.contains('pick')) { e.preventDefault(); if (e.shiftKey) rangeSel(path, true); else { F.picking = !fine.matches; toggleSel(path); } return; }
+  // No preventDefault: a cancelled click puts the box back after paint ticks it.
+  if (e.target.classList.contains('pick')) { if (e.shiftKey) rangeSel(path, true); else { F.picking = !fine.matches; toggleSel(path); } return; }
   if (e.shiftKey) return rangeSel(path, e.metaKey || e.ctrlKey);
   if (e.metaKey || e.ctrlKey) return toggleSel(path);
   if (pointer === 'mouse') return selectOnly(path);
