@@ -47,7 +47,7 @@ NET_SRC         := $(wildcard $(NET)/*.cpp)
 UNIT_SRC        := $(wildcard unit/*.cpp)
 INTEGRATION_SRC := $(wildcard integration/*.cpp)
 QUIRC_OBJ       := $(patsubst $(QUIRC)/%.c,$(BUILD)/quirc/%.o,$(wildcard $(QUIRC)/*.c))
-HEADERS         := $(wildcard $(CORE)/*.hpp $(NET)/*.hpp $(QUIRC)/*.h *.hpp)
+HEADERS         := $(wildcard $(CORE)/*.hpp $(NET)/*.hpp $(QUIRC)/*.h $(STB)/*.h *.hpp)
 
 .PHONY: all check unit integration scripts clean
 

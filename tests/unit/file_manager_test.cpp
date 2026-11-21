@@ -631,6 +631,77 @@ TEST("picture: decodes a BMP file and refuses non-pictures")
     CHECK(!error.empty());
 }
 
+// A 3x1 BMP of red, green and blue, as screenshot tools write them: hsz is
+// the header's size, gap the bytes between it and the pixels, and a
+// negative height stores the rows top down.
+std::string screenshotBmp(uint32_t hsz, uint16_t bpp, uint32_t gap,
+                          int32_t height = 1)
+{
+    const uint32_t offset = 14 + hsz + gap;
+    std::string row;
+    if (bpp == 24) {
+        row = std::string("\0\0\xff\0\xff\0\xff\0\0", 9); // BGR
+    } else {
+        row = std::string("\x00\xf8\xe0\x07\x1f\x00", 6); // RGB565
+    }
+    row.resize((row.size() + 3) & ~size_t(3), '\0');
+    std::string bmp(offset, '\0');
+    bmp[0] = 'B';
+    bmp[1] = 'M';
+    putLe32(bmp, 10, offset);
+    putLe32(bmp, 14, hsz);
+    putLe32(bmp, 18, 3);
+    putLe32(bmp, 22, static_cast<uint32_t>(height));
+    bmp[26] = 1;
+    bmp[28] = static_cast<char>(bpp);
+    if (bpp == 16) {
+        bmp[30] = 3; // bit fields, inside a 56-byte header
+        putLe32(bmp, 54, 0xf800);
+        putLe32(bmp, 58, 0x07e0);
+        putLe32(bmp, 62, 0x001f);
+    }
+    bmp += row;
+    putLe32(bmp, 2, static_cast<uint32_t>(bmp.size()));
+    return bmp;
+}
+
+TEST("picture: decodes Luma3DS, nds-bootstrap and top-down screenshots")
+{
+    TempDir temp;
+    struct Case {
+        const char *name;
+        std::string bytes;
+    };
+    const Case cases[] = {
+        // Luma3DS: 24-bit with 10 bytes after the header, which once
+        // started the pixels a byte off and swapped the colours round.
+        {"luma.bmp", screenshotBmp(40, 24, 10)},
+        // nds-bootstrap (TWiLight Menu): RGB565 masks in a 56-byte header,
+        // once refused with "bad offset".
+        {"nds.bmp", screenshotBmp(56, 16, 0)},
+        {"topdown.bmp", screenshotBmp(40, 24, 0, -1)},
+    };
+    for (const Case &c : cases) {
+        const std::string path = temp.path() + c.name;
+        CHECK(writeText(path, c.bytes));
+        uint32_t width = 0;
+        uint32_t height = 0;
+        CHECK(picture::size(path, width, height));
+        CHECK_EQ(height, static_cast<uint32_t>(1));
+        picture::Picture result;
+        std::string error;
+        CHECK(picture::load(path, 3, 1, 0, result, error));
+        CHECK_EQ(error, std::string());
+        if (result.pixels.size() == 3) {
+            CHECK_EQ(result.pixels[0], static_cast<uint16_t>(0xf800));
+            CHECK_EQ(result.pixels[1], static_cast<uint16_t>(0x07e0));
+            CHECK_EQ(result.pixels[2], static_cast<uint16_t>(0x001f));
+        } else {
+            CHECK_EQ(result.pixels.size(), static_cast<size_t>(3));
+        }
+    }
+}
+
 TEST("picture: decodes from memory and fills a box by cutting the edges")
 {
     // A 4x1 24-bit BMP: blue, green, red, white.
