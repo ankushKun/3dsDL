@@ -517,6 +517,90 @@ symbol .fill {
   }
 }
 
+/* Homebrew of the Month on r/3DSHomebrew: a panel on its ledge, laurels
+   round a medal hung on the face buttons' red and blue. */
+.award {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto 22px;
+  padding: 8px 20px 9px 12px;
+  border-radius: 18px;
+  background: var(--panel);
+  box-shadow: 0 0 0 1px var(--rim), inset 0 2px 0 #fff, 0 4px 0 var(--rim-lo), 0 10px 20px rgba(36, 56, 78, 0.1);
+  color: var(--ink);
+  text-decoration: none;
+  transition: transform 260ms var(--spring), box-shadow var(--dur-press) var(--ease-out);
+}
+
+.award:hover {
+  transform: translateY(-2px);
+}
+
+.award:active {
+  transform: translateY(4px);
+  box-shadow: 0 0 0 1px var(--rim), inset 0 2px 0 #fff, 0 0 0 var(--rim-lo), 0 2px 6px rgba(36, 56, 78, 0.1);
+  transition-duration: var(--dur-press);
+}
+
+.award-mark {
+  display: flex;
+  flex: none;
+  align-items: center;
+}
+
+.award-leaf {
+  width: 20px;
+  height: 41px;
+  fill: #b3c0cb;
+}
+
+.award-medal + .award-leaf {
+  transform: scaleX(-1);
+}
+
+.award-medal {
+  width: 34px;
+  height: 48px;
+  margin: 0 2px;
+}
+
+.award-words {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+}
+
+.award-from {
+  font: 400 13px/1.2 var(--dot);
+  letter-spacing: 0.05em;
+  color: var(--dim);
+}
+
+.award-name {
+  font: 800 19px/1.15 var(--font);
+  white-space: nowrap;
+}
+
+@media (max-width: 400px) {
+  .award {
+    gap: 10px;
+    padding: 7px 16px 8px 10px;
+  }
+
+  .award-name {
+    font-size: 16px;
+  }
+}
+
+@media (max-width: 340px) {
+  .award-leaf {
+    display: none;
+  }
+}
+
 .hero h1 {
   max-width: 12.5em;
   margin: 0 auto 18px;
