@@ -68,9 +68,9 @@ bottom-left corner. To change the video, update `data-video`, the link, the leng
 ## Support
 
 `#funds` pins GitHub Sponsors, Buy Me a Coffee and Ko-fi (the accounts in `.github/FUNDING.yml`)
-to the left edge, opposite the 3dsFM card, as glossy pills in each platform's colours. From
+to the left edge as glossy pills in each platform's colours. From
 1420 px the gutter beside the page fits them, so they stand there in view; narrower, they wait
-behind a Support tab that hover or a tap slides out, as the 3dsFM card does. The three marks are
+behind a Support tab that hover or a tap slides out. The three marks are
 Simple Icons (CC0) symbols in the page's sprite.
 
 ## Loved on Reddit
@@ -116,7 +116,7 @@ Privacy Control.
 Custom events go through `window.track(name, props)`: `send_qr_made`, `send_qr_enlarged` and
 `send_link_shared` from the "send a link" tool (with the link's host, never the whole link),
 `install_method`, `feature_viewed`, `faq_opened`, `menu_sounds`, `download_link_copied` and
-`buddy_opened` (the 3dsFM card), and `reddit_comment_opened` (with the commenter's username). The send form, its QR code and the large-code dialog carry
+`reddit_comment_opened` (with the commenter's username). The send form, its QR code and the large-code dialog carry
 `ph-no-capture`, so neither autocapture nor session replay records them, and a shared `?url=` is
 taken out of the address bar before PostHog starts. What the site sends is listed on https://ankush.one/privacy/, so
 update that page when adding an event.

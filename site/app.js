@@ -1265,20 +1265,6 @@
   setUpSounds();
 })();
 
-// The buddy card on the right edge: the sibling app, peeking in. Hover
-// opens it on a pointer; a tap on its tab opens and closes it on touch.
-(function () {
-  "use strict";
-  var buddy = document.getElementById("buddy");
-  if (!buddy) return;
-  var tab = buddy.querySelector(".buddy-tab");
-  tab.addEventListener("click", function (event) {
-    event.preventDefault();
-    if (buddy.classList.toggle("is-open")) window.track("buddy_opened", { app: "3dsFM" });
-  });
-  if (location.search.indexOf("buddy=open") !== -1) buddy.classList.add("is-open");
-})();
-
 // Support on the left edge. Wide screens show it outright; narrower ones
 // open it with its tab, which a tap also closes.
 (function () {
